@@ -111,8 +111,10 @@ def check(root, run_id):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('run', help='runs/<run_id> or run_id')
+    parser.add_argument('--root', default='.', help='project root containing reports/ and findings/ '
+                         '(default: current directory; browser-started projects pass projects/<id>)')
     args = parser.parse_args()
-    errors, warnings = check(Path.cwd(), Path(args.run).name)
+    errors, warnings = check(Path(args.root), Path(args.run).name)
     for message in warnings:
         print('WARN: ' + message)
     for message in errors:

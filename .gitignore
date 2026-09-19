@@ -10,6 +10,10 @@
 .agents/
 .codex/
 
+# --- Browser-started research projects (real, user-created; not shipped examples) ---
+projects/*
+!projects/.gitkeep
+
 # --- Python ---
 __pycache__/
 *.py[cod]
