@@ -1,0 +1,39 @@
+# --- Local backups / snapshots (not meant for sharing) ---
+.backup-*/
+
+# --- Claude Code / agent LOCAL settings (machine-specific: local paths, permissions) ---
+# Shared agent config (.claude/agents, .claude/commands, CLAUDE.md) is tracked on purpose.
+.claude/settings.local.json
+.claude/*.local.json
+
+# --- Empty scaffolding dirs created by other tools ---
+.agents/
+.codex/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# --- Node (in case the ui/ prototype gains tooling later) ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# --- Environment files / secrets (never commit these) ---
+.env
+.env.*
+*.local
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
