@@ -273,6 +273,36 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 }
 .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); font-weight: 600; }
 
+/* Research-approach cards */
+.approach-grid { border: 0; padding: 0; margin: 14px 0 4px; min-inline-size: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .approach-grid { grid-template-columns: 1fr; } }
+.approach-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.approach-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.approach-head { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.approach-head input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+.approach-title { font-weight: 700; font-size: 1.1rem; }
+.approach-card textarea.approach-prompt { min-height: 170px; }
+.approach-meta { margin: 8px 0 0; padding-left: 18px; font-size: 0.85rem; color: var(--text-muted); }
+.approach-meta li { margin: 4px 0; }
+textarea.approach-prompt { width: 100%; font: inherit; line-height: 1.5; }
+
+/* Read-only prompt box shown when reopening a saved project */
+.prompt-quote {
+  white-space: pre-wrap;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+}
+
 /* Stepper */
 .stepper { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
 .stepper .step {

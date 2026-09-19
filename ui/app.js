@@ -47,8 +47,11 @@
       answers: {},
       depth: "Balanced",
       timeframe: "Latest available",
+      approach: "quick",      // machine-readable: "quick" | "deep" (Quick is the default)
+      prompts: {},            // generated research prompts: { quick, deep }
+      promptEdited: {},       // which prompts the user hand-edited (never auto-overwritten)
       brief: null,
-      edited: {}   // which brief fields the user hand-edited (never auto-overwritten)
+      edited: {}              // which brief fields the user hand-edited (never auto-overwritten)
     };
   }
   function normalizeDraft(d) {
@@ -59,6 +62,9 @@
     d.answers = d.answers || {};
     d.depth = d.depth || "Balanced";
     d.timeframe = d.timeframe || "Latest available";
+    d.approach = (d.approach === "quick" || d.approach === "deep") ? d.approach : "quick";
+    d.prompts = d.prompts || {};
+    d.promptEdited = d.promptEdited || {};
     d.edited = d.edited || {};
     return d;
   }
@@ -543,6 +549,7 @@
 
     if (state.draft.step === 1) wrap.appendChild(stepQuestion());
     else if (state.draft.step === 2) wrap.appendChild(stepFollowups());
+    else if (state.draft.step === 3) wrap.appendChild(stepApproach());
     else wrap.appendChild(stepBrief());
     return wrap;
   }
@@ -553,8 +560,11 @@
       var num = n < step ? "✓" : n;
       return '<div class="' + cls + '"><span class="num">' + num + '</span>' + label + '</div>';
     }
-    return el('<div class="stepper" role="list">' + s(1, "Your question") + s(2, "Follow-ups") + s(3, "Review brief") + '</div>');
+    return el('<div class="stepper" role="list">' +
+      s(1, "Your question") + s(2, "Follow-ups") + s(3, "Research approach") + s(4, "Review brief") + '</div>');
   }
+
+  function approachLabel(a) { return a === "deep" ? "Deep research" : "Quick research"; }
 
   function stepQuestion() {
     var d = state.draft;
@@ -652,7 +662,7 @@
       '<div id="fu"></div>' +
       '<div class="btn-row">' +
         '<button class="btn secondary" id="fu-back">Back</button>' +
-        '<button class="btn" id="fu-next">Build my research brief</button>' +
+        '<button class="btn" id="fu-next">Choose research approach</button>' +
       '</div>';
 
     var fu = c.querySelector("#fu");
@@ -667,7 +677,146 @@
     });
 
     c.querySelector("#fu-back").addEventListener("click", function () { d.step = 1; persistDraft(); navTo("new"); });
-    c.querySelector("#fu-next").addEventListener("click", function () { d.step = 3; syncBrief(d); persistDraft(); navTo("new"); });
+    c.querySelector("#fu-next").addEventListener("click", function () { d.step = 3; syncPrompts(d); persistDraft(); navTo("new"); });
+    return c;
+  }
+
+  // ---- Research-approach prompts (generated locally from the user's inputs) ----
+  // Extra context appended to both prompts: timeframe, follow-up answers, document names.
+  function promptContext(d) {
+    var parts = [];
+    if (d.timeframe) parts.push("Timeframe: " + d.timeframe + ".");
+    var set = followupSet(d);
+    var qa = [];
+    set.forEach(function (q, idx) {
+      var a = d.answers["a" + idx];
+      if (a && a.trim()) qa.push(q + " " + a.trim());
+    });
+    if (qa.length) parts.push("Extra details from the person asking: " + qa.join(" | ") + ".");
+    if (d.files && d.files.length) parts.push("Documents they provided (names only, not yet processed): " + d.files.join(", ") + ".");
+    return parts.length ? "\n\nContext:\n- " + parts.join("\n- ") : "";
+  }
+
+  function generatePrompts(d) {
+    var q = (d.question || "").trim();
+    var ctx = promptContext(d);
+    var quick =
+      "Give a quick, practical answer to: \"" + q + "\".\n\n" +
+      "Keep the scope narrow and focused on the decision. Compare only the main options at a high level — " +
+      "group similar items into families or tiers instead of listing every individual variant — and highlight " +
+      "the few differences that actually affect the choice. Use a small number of strong, recent sources, and " +
+      "skip background theory and exhaustive side-by-side detail. Deliver a concise report with a short summary " +
+      "table and a clear recommendation, and state plainly anything that remains uncertain." + ctx;
+    var deep =
+      "Research this thoroughly: \"" + q + "\".\n\n" +
+      "Take a broad scope and compare the important options in detail, including meaningful sub-categories and " +
+      "alternatives. Where relevant, account for different generations or versions, product variants (for example " +
+      "desktop versus laptop), and the workloads or use cases that change the answer. Prefer primary sources and " +
+      "support important claims with independent evidence; investigate contradictions and notable alternatives. " +
+      "Consider performance evidence, power and efficiency, pricing, and real-world limitations. Break the work into " +
+      "several research tasks where that helps, keep evidence records, and verify the key claims. Deliver a detailed " +
+      "report with a full comparison, a recommendation, and an explicit section on limitations and remaining uncertainty." + ctx;
+    return { quick: quick, deep: deep };
+  }
+
+  // Refresh generated prompts to reflect current inputs, preserving any the user edited.
+  function syncPrompts(d) {
+    if (!d.prompts) d.prompts = {};
+    if (!d.promptEdited) d.promptEdited = {};
+    var fresh = generatePrompts(d);
+    if (!d.promptEdited.quick) d.prompts.quick = fresh.quick;
+    if (!d.promptEdited.deep) d.prompts.deep = fresh.deep;
+    if (d.approach !== "quick" && d.approach !== "deep") d.approach = "quick";
+  }
+
+  var APPROACH_META = {
+    quick: [
+      "Scope: narrow and practical",
+      "Sources: a few strong, recent ones",
+      "Report: concise, with a summary table and a recommendation",
+      "Checking: light verification of the important claims"
+    ],
+    deep: [
+      "Scope: broad, with detailed comparisons",
+      "Sources: primary sources plus independent evidence",
+      "Report: detailed, with limitations and uncertainties",
+      "Checking: full evidence records and verification"
+    ]
+  };
+  var APPROACH_BLURB = {
+    quick: "Best for everyday comparisons and straightforward questions.",
+    deep: "Best for technical decisions, expensive purchases, professional work, or questions where a mistake would matter."
+  };
+
+  function stepApproach() {
+    var d = state.draft;
+    syncPrompts(d);
+
+    var c = el('<div class="card"></div>');
+    c.innerHTML =
+      '<h2 style="margin-top:0">Choose your research approach</h2>' +
+      '<p class="muted">We drafted two research prompts from your question and answers. Pick the one that fits, ' +
+      'and edit either prompt if you want to change the focus. You can switch or edit again later.</p>' +
+      '<div class="callout sim"><strong>Prototype note:</strong> these prompts are written on your device from a ' +
+      'simple template — no Claude and no internet are involved. A finished app could use Claude to improve them.</div>' +
+      '<fieldset class="approach-grid"><legend class="sr-only">Research approach</legend>' +
+        approachCardHtml("quick") + approachCardHtml("deep") +
+      '</fieldset>' +
+      '<div class="btn-row">' +
+        '<button class="btn secondary" id="ap-back">Back</button>' +
+        '<button class="btn" id="ap-next">Continue to brief</button>' +
+      '</div>';
+
+    function approachCardHtml(key) {
+      var title = approachLabel(key);
+      var meta = APPROACH_META[key].map(function (m) { return "<li>" + esc(m) + "</li>"; }).join("");
+      return '<div class="approach-card" data-approach="' + key + '">' +
+        '<label class="approach-head">' +
+          '<input type="radio" name="approach" value="' + key + '" />' +
+          '<span class="approach-title">' + esc(title) + '</span>' +
+        '</label>' +
+        '<p class="muted small" style="margin:6px 0 10px">' + esc(APPROACH_BLURB[key]) + '</p>' +
+        '<label class="field" for="prompt-' + key + '" style="margin-top:0">Research prompt (editable)</label>' +
+        '<textarea id="prompt-' + key + '" class="approach-prompt"></textarea>' +
+        '<p class="tag" style="margin:12px 0 4px">Expected depth &amp; report style</p>' +
+        '<ul class="approach-meta">' + meta + '</ul>' +
+      '</div>';
+    }
+
+    // wire each card
+    ["quick", "deep"].forEach(function (key) {
+      var cardEl = c.querySelector('.approach-card[data-approach="' + key + '"]');
+      var radio = cardEl.querySelector('input[type="radio"]');
+      var ta = cardEl.querySelector("textarea");
+      ta.value = d.prompts[key] || "";
+      ta.addEventListener("input", function () { d.prompts[key] = ta.value; d.promptEdited[key] = true; persistDraft(); });
+      radio.addEventListener("change", function () { if (radio.checked) selectApproach(key); });
+      // clicking the card selects it (but not when interacting with the textarea)
+      cardEl.addEventListener("click", function (e) {
+        if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+        selectApproach(key);
+      });
+    });
+
+    function selectApproach(key) {
+      d.approach = key;
+      persistDraft();
+      applySelection();
+    }
+    function applySelection() {
+      ["quick", "deep"].forEach(function (key) {
+        var cardEl = c.querySelector('.approach-card[data-approach="' + key + '"]');
+        var radio = cardEl.querySelector('input[type="radio"]');
+        var on = d.approach === key;
+        radio.checked = on;
+        cardEl.classList.toggle("selected", on);
+        cardEl.setAttribute("aria-selected", on ? "true" : "false");
+      });
+    }
+    applySelection();
+
+    c.querySelector("#ap-back").addEventListener("click", function () { d.step = 2; persistDraft(); navTo("new"); });
+    c.querySelector("#ap-next").addEventListener("click", function () { d.step = 4; syncBrief(d); persistDraft(); navTo("new"); });
     return c;
   }
 
@@ -724,7 +873,8 @@
 
   function stepBrief() {
     var d = state.draft;
-    syncBrief(d); // keep non-edited fields in step with any setup changes
+    syncBrief(d);   // keep non-edited fields in step with any setup changes
+    syncPrompts(d); // ensure the generated prompts exist and reflect current inputs
     var b = d.brief;
 
     var c = el('<div class="card"></div>');
@@ -747,6 +897,12 @@
         '<div><label class="field" for="b-depth">Depth</label>' +
           '<select id="b-depth"><option>Quick answer</option><option>Balanced</option><option>Thorough report</option></select></div>' +
       '</div>' +
+
+      '<label class="field">Research approach</label>' +
+      '<div class="callout info" style="margin-top:6px" id="b-approach-box"></div>' +
+      '<label class="field" for="b-prompt">Selected research prompt</label>' +
+      '<p class="hint">This is the prompt that would guide the research. You can edit it here or on the previous step.</p>' +
+      '<textarea id="b-prompt" class="approach-prompt"></textarea>' +
 
       '<label class="field" for="b-in">What is in scope</label>' +
       '<textarea id="b-in" style="min-height:70px"></textarea>' +
@@ -780,6 +936,24 @@
     inf.addEventListener("input", function () { b.inScope = inf.value; d.edited.inScope = true; persistDraft(); });
     var outf = c.querySelector("#b-out"); outf.value = b.outScope || "";
     outf.addEventListener("input", function () { b.outScope = outf.value; d.edited.outScope = true; persistDraft(); });
+
+    // Selected approach + the final selected prompt (kept in sync with the approach step).
+    var promptTa = c.querySelector("#b-prompt");
+    var approachBox = c.querySelector("#b-approach-box");
+    function renderApproach() {
+      approachBox.innerHTML = '<p style="margin:0"><strong>' + esc(approachLabel(d.approach)) + '</strong> ' +
+        '<span class="muted">— ' + esc(APPROACH_BLURB[d.approach]) + '</span></p>';
+      var change = el('<button class="btn ghost small" style="margin-top:8px">Change approach</button>');
+      change.addEventListener("click", function () { d.step = 3; persistDraft(); navTo("new"); });
+      approachBox.appendChild(change);
+      promptTa.value = d.prompts[d.approach] || "";
+    }
+    promptTa.addEventListener("input", function () {
+      d.prompts[d.approach] = promptTa.value;
+      d.promptEdited[d.approach] = true;
+      persistDraft();
+    });
+    renderApproach();
 
     var tasksBox = c.querySelector("#b-tasks");
     function renderTasks() {
@@ -827,7 +1001,7 @@
     }
     renderContext();
 
-    c.querySelector("#b-back").addEventListener("click", function () { d.step = 2; persistDraft(); navTo("new"); });
+    c.querySelector("#b-back").addEventListener("click", function () { d.step = 3; persistDraft(); navTo("new"); });
     c.querySelector("#b-approve").addEventListener("click", function () {
       var msg = c.querySelector("#b-msg"); msg.innerHTML = "";
       if (!b.title.trim() || !b.question.trim()) {
@@ -847,6 +1021,11 @@
         outScope: b.outScope,
         tasks: b.tasks.slice(),
         context: briefContext(d),
+        // Stable machine-readable approach ("quick"/"deep") plus the complete selected
+        // prompt, so the choice can later drive the real research workflow.
+        approach: d.approach,
+        selectedPrompt: d.prompts[d.approach] || "",
+        prompts: { quick: d.prompts.quick || "", deep: d.prompts.deep || "" },
         statusLabel: "Saved · not started",
         updated: today(),
         createdAt: new Date().toISOString()
@@ -1052,9 +1231,14 @@
     var right = el('<div class="work-main"></div>');
     var ctx = p.context || { answers: [], files: [], depth: p.depth, timeframe: p.timeframe };
     var ctxHtml = '<h3 style="margin-top:0">Your approved brief</h3>' +
+      '<p><strong>Approach:</strong> ' + esc(approachLabel(p.approach)) + '</p>' +
       '<p><strong>Depth:</strong> ' + esc(ctx.depth || p.depth || "") + ' &nbsp;·&nbsp; <strong>How current:</strong> ' + esc(ctx.timeframe || p.timeframe || "") + '</p>' +
       '<p><strong>In scope:</strong> ' + esc(p.inScope || "") + '</p>' +
       '<p><strong>Out of scope:</strong> ' + esc(p.outScope || "") + '</p>';
+    if (p.selectedPrompt) {
+      ctxHtml += '<p style="margin-bottom:4px"><strong>Selected research prompt:</strong></p>' +
+        '<div class="prompt-quote">' + esc(p.selectedPrompt) + '</div>';
+    }
     if (ctx.answers && ctx.answers.length) {
       ctxHtml += '<p style="margin-bottom:4px"><strong>Follow-up answers:</strong></p><ul style="margin-top:0">' +
         ctx.answers.map(function (qa) { return "<li>" + esc(qa.q) + " — <em>" + esc(qa.a) + "</em></li>"; }).join("") + "</ul>";

@@ -46,12 +46,41 @@ open `research.html` in your browser directly instead (Option A).
 1. **Welcome** — what the app does and a short first-time guide.
 2. **My research** — your saved prototype projects plus example projects, each with clear status
    and a *Start research* button.
-3. **New research** — type a plain-language question, optionally attach document names, answer
-   suggested follow-ups, then review and **edit** a research brief. Your answers, depth/timeframe,
-   and document names are carried into the brief.
+3. **New research** — a four-step wizard:
+   1. *Your question* — type a plain-language question, optionally attach document names, and set
+      how current / how deep (optional).
+   2. *Follow-ups* — answer a few optional questions that sharpen the request.
+   3. *Research approach* — pick between **Quick research** and **Deep research** (see below).
+   4. *Review brief* — review and **edit** a research brief; your answers, depth/timeframe, document
+      names, the chosen approach, and the selected prompt are all carried in.
 4. **Research workspace** — example progress, questions needing attention, and a readable report
    with a table of contents, headings, tables, and clickable citations with a *Back to reading*
    button (open the sample report to see it).
+
+## The "Research approach" step
+
+After the follow-ups, the app shows two side-by-side cards — **Quick research** and **Deep
+research** — each with a plain-language explanation, an **editable research prompt**, and a summary
+of the expected depth and report style. You compare them, edit either prompt, and choose one
+(Quick is selected by default). The choice is stored as a stable machine value (`quick` or `deep`)
+together with the full selected prompt, so it could later drive the real research workflow — though
+**no research is executed in this prototype**.
+
+- *Quick* is aimed at everyday comparisons: a narrow scope, a few strong recent sources, the
+  decision-relevant differences, and a concise report with a summary table and recommendation.
+- *Deep* is aimed at technical decisions, expensive purchases, or professional work: broader scope,
+  primary sources plus independent evidence, alternatives and contradictions, and a detailed report
+  with limitations and uncertainties.
+
+The step deliberately does **not** promise any duration, cost, or number of searches, because those
+cannot be guaranteed.
+
+**Local generation vs. future Claude improvement.** In this prototype the two prompts are written
+entirely **on your device** from a simple built-in template that fills in your question, follow-up
+answers, document names, and timeframe — there is no Claude call and no internet request. A finished
+app could instead use Claude to *improve* these prompts (sharper wording, better-tailored scope),
+but that is not implemented here. If you edit a prompt, your edit is preserved: going back to change
+an earlier answer only regenerates the prompt(s) you did **not** touch.
 
 ## Saving (local to this browser)
 
@@ -66,7 +95,10 @@ the app still works for the visit but shows a notice that nothing can be saved.
 |------|--------|
 | Main navigation (Welcome / My research / New research / workspace) | Functional |
 | New-research wizard and **brief editing** (edit text, add/remove steps, approve) | Functional |
-| Carrying follow-up answers, depth/timeframe, and document names into the brief | Functional |
+| **Research approach** step: compare/edit two prompts, choose Quick or Deep | Functional |
+| Carrying answers, depth/timeframe, documents, approach, and prompt into the brief | Functional |
+| Local (on-device) prompt generation from a template | Functional |
+| Claude-powered prompt *improvement* | Not implemented (future) |
 | Creating a project, reopening it, and surviving refresh (local storage) | Functional |
 | Table of contents, citation navigation, *Back to reading*, focus-reading toggle | Functional |
 | Sample report content (commuter bike) | **Fictional**, placeholder sources, read-only |
