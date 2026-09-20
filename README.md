@@ -14,15 +14,19 @@ security boundaries. Both paths write to the same kind of files and use the same
 below; the browser one just adds a guided front end and, for projects it starts, its own
 `projects/<id>/` folder (see [Files](#files)). The browser path also has no Bash tool available to
 the Claude session it launches (unlike a terminal `/research` session, which does) — see
-[ui/README.md](ui/README.md) for what that means for the citation checker.
+[ui/README.md](ui/README.md) for what that means for the citation checker. Project folder names are
+derived from the research title, followed by a timestamp and short unique suffix, so they remain
+recognizable outside the browser.
 
 The browser and its backend stay on your computer, but a real research run sends your question and
 working context to Claude through your signed-in Claude Code CLI and fetches relevant web sources.
-The browser-started Claude process has no Bash tool or unrelated account connectors. Its file tools
-are still granted at the repository level by Claude Code, however: keeping writes inside the chosen
-`projects/<id>/` folder is enforced by the workflow instructions, not by an operating-system
-per-project sandbox. Treat this repository copy as the research app's trusted workspace. See the
-full [security explanation](ui/README.md#security-boundaries-this-backend-enforces).
+The browser-started Claude process has no Bash tool or unrelated account connectors. It exposes and
+pre-approves the same narrow tool list, including WebSearch and WebFetch, because an unattended
+browser run has no interactive permission window. Its file tools are still granted at the
+repository level by Claude Code, however: keeping writes inside the chosen `projects/<id>/` folder
+is enforced by the workflow instructions, not by an operating-system per-project sandbox. Treat
+this repository copy as the research app's trusted workspace. See the full
+[security explanation](ui/README.md#security-boundaries-this-backend-enforces).
 
 ## Start (terminal)
 Open this project in Claude Code and run:
@@ -53,6 +57,12 @@ The instructions require checkpoints during research, not only after a usage err
 loss, but prompt compliance and filesystem writes are not a crash-recovery guarantee. Context
 compaction and account allowance are different: reload saved state after compaction; wait for an
 account reset when blocked. This project does not itself wait and restart automatically.
+
+For browser-started projects, reopen **My research** after the allowance resets and click
+**Resume**. If the run stopped because it could not access any evidence, it appears as **Needs
+attention** with its saved failure notes and a **Resume research** button. The app resumes the same
+Claude session and preserves the existing plan; it does not label the failure notes as a completed
+answer.
 
 Official Claude Code documentation exposes usage percentages and reset timestamps to a custom
 status-line script when available for the account/session:
@@ -95,7 +105,10 @@ claim or verify source truth, quotation accuracy, freshness, cache compatibility
 Those remain coordinator/verifier responsibilities. Tests are synthetic and use no live models.
 In the browser, plain **Completed** means this checker ran and passed. A failed, missing, timed-out,
 or otherwise unavailable check produces **Completed with warnings**; a repair button is offered
-only when the checker actually found a structural citation problem.
+only when the checker actually found a structural citation problem. A run that records
+`inaccessible_evidence` or `needs_clarification` is **Needs attention**, even if it wrote a Markdown
+file. `important_uncertainty` and `budget_exhausted` produce **Completed with warnings**. Older
+projects with a falsely clean status are reconciled from their saved stop reason when reopened.
 
 ## Existing records
 This repository ships with **no bundled research runs** — the `findings/`, `reports/`, `runs/`
@@ -112,7 +125,8 @@ predecessor, and never manufacture excerpts or missing metadata.
 - runs/<run_id>/verification.md: versioned audit coverage and issue dispositions.
 - findings/<run_id>/<task_id>.md and .json: task findings and evidence.
 - reports/<run_id>.md: report; sources/: user inputs.
-- projects/<project_id>/: self-contained folder for each browser-started project (its own
+- projects/<descriptive-title>-<timestamp>-<suffix>/: self-contained folder for each
+  browser-started project (its own
   `runs/`, `findings/`, `reports/`, `sources/`, plus `project.json`, `state/` and `logs/`) — see
   [ui/README.md](ui/README.md). Not committed to this repo (see .gitignore); created on your
   machine as you use the browser interface. Removed projects move to `projects/.trash/` rather
