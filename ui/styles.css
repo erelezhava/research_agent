@@ -218,7 +218,10 @@ h3 { font-size: 1.1rem; margin: 22px 0 8px; }
 .btn.secondary:hover { background: var(--surface-2); color: var(--accent-strong); }
 .btn.ghost { background: none; border-color: transparent; color: var(--text-muted); }
 .btn.ghost:hover { background: var(--surface-2); color: var(--text); }
+.btn.danger { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+.btn.danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.danger:disabled:hover { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 18px; }
 
 /* Contextual help links: "Show me how", "Help" beside error/attention states */

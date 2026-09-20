@@ -1528,10 +1528,10 @@
         "**Documents you select are not " +
         "processed** — only their file names are recorded, nothing is uploaded or read. Clearing " +
         "your browser's storage only affects draft questions in standalone preview mode — it never " +
-        "touches real project folders. To remove a real project, open it and use **Remove this " +
-        "project** at the bottom of the page — it moves the folder into a local, recoverable trash " +
+        "touches real project folders. To delete a real research project, use **Delete** on its card " +
+        "or open it and use **Delete this research** — the folder moves into a local, recoverable trash " +
         "location rather than deleting it outright, and its log may contain your question, sources, " +
-        "and Claude's output, so remove it if you no longer want that kept.",
+        "and Claude's output, so delete it if you no longer want that kept.",
       "",
       "## Pausing, resuming, and failures",
       "",
@@ -1588,7 +1588,7 @@
       "| Project shows Completed — with warnings | Follow the action shown: **Continue research** for an exhausted research budget, **Ask Claude to fix this** for a citation defect, or read the limitation when no automatic action applies |",
       "| Project shows Completed — known limitations | The useful bounded follow-ups are finished. Read the report normally; start a new project only for a different scope or new source material. |",
       "| Citation check unavailable | The report exists, but its citation structure was not validated; read the reason shown and retry after fixing the local checker |",
-      "| Can't remove a project | Research must be stopped first; the confirmation text must exactly match the project's title |",
+      "| Can't delete a research | Research must be stopped first; the confirmation text must exactly match the research title |",
       "",
       "For full installation and update instructions, the exact command-line details, and the " +
         "project folder schema, see `USER_GUIDE.md` in the project's main folder."
@@ -1706,8 +1706,45 @@
   };
   function serverStatusMeta(status) { return SERVER_STATUS_META[status] || { label: status || "Unknown", pill: "draft" }; }
 
+  function serverProjectIsActive(p) {
+    return p.status === "starting" || p.status === "researching";
+  }
+
+  // Card-level deletion keeps the action discoverable in My research. The
+  // exact-title confirmation mirrors the detail-page form and is validated
+  // again by the backend. Server removal is recoverable: the project folder
+  // is moved to projects/.trash rather than erased.
+  function deleteServerProjectFromCard(p, button, messageNode) {
+    if (serverProjectIsActive(p)) return;
+    messageNode.innerHTML = "";
+    var typed = window.prompt(
+      "Delete “" + p.title + "”?\n\n" +
+      "This moves the research to the local recoverable trash folder.\n\n" +
+      "Type the complete research title to confirm:"
+    );
+    if (typed === null) return;
+    if (typed !== p.title) {
+      messageNode.appendChild(el('<div class="msg error small" role="alert">The title did not match. Nothing was deleted.</div>'));
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "Deleting…";
+    apiFetch("/api/projects/" + encodeURIComponent(p.id) + "/remove", {
+      method: "POST",
+      body: { confirmTitle: typed }
+    }).then(function () {
+      state.serverProjects = (state.serverProjects || []).filter(function (item) { return item.id !== p.id; });
+      navTo("projects");
+    }).catch(function (e) {
+      button.disabled = false;
+      button.textContent = "Delete";
+      messageNode.appendChild(el('<div class="msg error small" role="alert">' + esc(e.message) + '</div>'));
+    });
+  }
+
   function serverProjectCard(p) {
     var meta = serverStatusMeta(p.status);
+    var active = serverProjectIsActive(p);
     var summary = (p.question || "").replace(/\s+/g, " ").trim();
     if (summary.length > 150) summary = summary.slice(0, 147).trimEnd() + "…";
     var c = el(
@@ -1720,10 +1757,17 @@
         '<p class="meta">Updated ' + esc((p.updatedAt || "").slice(0, 10)) + ' &middot; ' + esc(approachLabel(p.approach)) + '</p>' +
         '<p class="muted project-card-summary" title="' + esc(p.question || "") + '">' + esc(summary) + '</p>' +
         '<div class="spacer"></div>' +
-        '<div class="foot"><span></span><button class="btn secondary open-btn">Open</button></div>' +
+        '<div class="foot"><button class="btn danger small server-delete-btn"' +
+          (active ? ' disabled title="Stop this research before deleting it"' : '') + '>Delete</button>' +
+          '<button class="btn secondary open-btn">Open</button></div>' +
+        '<div class="server-delete-msg"></div>' +
       '</article>'
     );
     c.querySelector(".open-btn").addEventListener("click", function () { navTo("workspace", { projectId: p.id }); });
+    var deleteBtn = c.querySelector(".server-delete-btn");
+    deleteBtn.addEventListener("click", function () {
+      deleteServerProjectFromCard(p, deleteBtn, c.querySelector(".server-delete-msg"));
+    });
     return c;
   }
 
@@ -1759,28 +1803,28 @@
     });
   }
 
-  // A safe, explicit-confirmation Remove action: the user must re-type the
+  // A safe, explicit-confirmation Delete action: the user must re-type the
   // project's own title (checked here, and again by the backend — never
   // trusted from the client alone) before anything happens. Refused while
   // the project is the active run (the backend enforces this too).
-  function renderRemoveSection(p) {
-    var active = p.status === "starting" || p.status === "researching";
-    var box = el('<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Remove this project</h3></div>');
+  function renderDeleteSection(p) {
+    var active = serverProjectIsActive(p);
+    var box = el('<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Delete this research</h3></div>');
     if (active) {
-      box.appendChild(el('<p class="small muted">Stop research before removing this project.</p>'));
+      box.appendChild(el('<p class="small muted">Stop this research before deleting it.</p>'));
       return box;
     }
     box.appendChild(el('<p class="small muted">Moves it to a local, recoverable trash folder — it is not ' +
-      'deleted outright. Its log may contain your question, sources, and Claude\'s output, so remove it if ' +
+      'erased permanently. Its log may contain your question, sources, and Claude\'s output, so delete it if ' +
       'you no longer want that kept.</p>'));
-    var toggle = el('<button class="btn ghost small">Remove…</button>');
+    var toggle = el('<button class="btn danger small">Delete…</button>');
     box.appendChild(toggle);
     var form = el('<div hidden></div>');
     form.innerHTML =
       '<label class="field" for="remove-confirm">Type the project title to confirm: <strong>' + esc(p.title) + '</strong></label>' +
       '<input type="text" id="remove-confirm" autocomplete="off" />' +
       '<div id="remove-msg"></div>' +
-      '<div class="btn-row"><button class="btn" id="remove-confirm-btn" disabled>Remove project</button> ' +
+      '<div class="btn-row"><button class="btn danger" id="remove-confirm-btn" disabled>Delete research</button> ' +
       '<button class="btn ghost small" id="remove-cancel-btn">Cancel</button></div>';
     box.appendChild(form);
     toggle.addEventListener("click", function () {
@@ -1840,7 +1884,7 @@
     }
     briefHtml += '<p style="margin-bottom:4px"><strong>Prompt:</strong></p><div class="prompt-quote">' + esc(p.selectedPrompt || "") + '</div></div>';
     left.appendChild(el(briefHtml));
-    left.appendChild(renderRemoveSection(p));
+    left.appendChild(renderDeleteSection(p));
     grid.appendChild(left);
     grid.appendChild(right);
     slot.appendChild(grid);

@@ -361,9 +361,9 @@ In plain terms, it holds:
 - **Clearing your browser's storage** only removes drafts you were composing in **standalone**
   preview mode (see [section 14](#14-advanced-section)) — it has **no effect** on real projects,
   which live as files in `projects/` regardless of what your browser does.
-- **Removing a project** is available directly in the app: open the project and use its **Remove**
-  control. It asks you to type the project's exact title to confirm (so it can't happen by
-  accident), refuses to remove a project that's currently running research, and moves the project's
+- **Deleting a research project** is available directly in the app: use **Delete** on its card or
+  open it and use **Delete this research**. It asks you to type the project's exact title to confirm
+  (so it can't happen by accident), refuses to delete a project that's currently running, and moves the project's
   folder into a local `projects/.trash/` folder rather than deleting it outright — so an accidental
   removal is still recoverable by hand from disk if you need it back. Its logs may contain your
   original question, sources, and Claude's output, so treat that trash folder with the same care as
@@ -411,7 +411,7 @@ update to the app's own code does not touch it. To update safely:
 - If you used `git clone` (Option B): `git pull` in the project folder. Since `projects/` isn't
   tracked by Git, pulling updates leaves it untouched automatically.
 
-To remove a project you no longer want, use its **Remove** control inside the app rather than
+To delete a project you no longer want, use its **Delete** control inside the app rather than
 deleting files by hand — see [section 10](#10-project-files-and-privacy). It moves the project to
 `projects/.trash/` instead of deleting it outright, so it stays recoverable.
 
@@ -440,7 +440,7 @@ is needed to read or restore them later.
 | A document I selected doesn't seem to affect the research | This is expected — documents are not read, only their names are noted | Include the relevant details as text in your question instead, for now (see [section 10](#10-project-files-and-privacy)) |
 | A project's report shows "Completed with warnings" | The run ended with material uncertainty/a budget limit, or the citation check found an issue, timed out, or could not run | Follow the action shown: use **Continue research** for an exhausted research budget, **Ask Claude to fix this** for a structural citation defect, or read the limitation when no automatic action is available |
 | A project shows "Completed — known limitations" | The useful bounded follow-ups are finished and remaining gaps are already disclosed | Read the report normally. Start a new project only if you have a different scope or new source material. |
-| I can't click Remove on a project | Removal is refused while that project is the currently active research run | Stop or wait for that run to finish first, then remove it |
+| I can't click Delete on a project | Deletion is refused while that project is the currently active research run | Stop or wait for that run to finish first, then delete it |
 
 ## 14. Advanced section
 
