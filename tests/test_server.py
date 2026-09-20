@@ -248,7 +248,23 @@ class OutcomeTests(ServerTestCase):
         final = self.wait_terminal(pid)
         self.assertEqual(final["status"], "interrupted")
         self.assertIsNotNone(final.get("sessionId"))
+        self.assertIn("session limit", final["error"].lower())
         # resumable: switch scenario so the resumed attempt succeeds
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        status, data = self.request("POST", f"/api/projects/{pid}/resume")
+        self.assertEqual(status, 202, data)
+        final2 = self.wait_terminal(pid)
+        self.assertEqual(final2["status"], "completed")
+
+    def test_temporary_network_failure_is_interrupted_and_resumable(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "network_error")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        final = self.wait_terminal(pid)
+        self.assertEqual(final["status"], "interrupted")
+        self.assertIsNotNone(final.get("sessionId"))
+        self.assertIn("eai_again", final["error"].lower())
+
         self.set_env("FAKE_CLAUDE_SCENARIO", "success")
         status, data = self.request("POST", f"/api/projects/{pid}/resume")
         self.assertEqual(status, 202, data)
@@ -376,6 +392,25 @@ class RestartRecoveryTests(ServerTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(data["project"]["status"], "needs-attention")
         self.assertEqual(data["project"]["stopReason"], "inaccessible_evidence")
+
+    def test_old_recoverable_failures_are_reconciled_to_interrupted(self):
+        messages = (
+            "You've hit your session limit · resets 1:50pm (Asia/Tbilisi)",
+            "API Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)",
+        )
+        for message in messages:
+            with self.subTest(message=message):
+                pid = self.create_project()
+                state_path = self.root / "projects" / pid / "state" / "run.json"
+                state = json.loads(state_path.read_text())
+                state.update(status="failed", sessionId="saved-session-id", error=message,
+                             stopReason="inaccessible_evidence")
+                state_path.write_text(json.dumps(state))
+
+                status, data = self.request("GET", f"/api/projects/{pid}")
+                self.assertEqual(status, 200)
+                self.assertEqual(data["project"]["status"], "interrupted")
+                self.assertIsNone(data["project"]["stopReason"])
 
 
 class NetworkSecurityTests(ServerTestCase):

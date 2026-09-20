@@ -1484,9 +1484,10 @@
       "- **Completed — with warnings** — a report was written, but research ended with a material " +
         "uncertainty or budget limit, the structural citation check found an issue, or the check could not run. The report " +
         "is still shown. A repair button appears only when a structural issue was actually found.",
-      "- **Failed** — did not finish; read the error message shown.",
-      "- **Interrupted — resumable** — stopped partway (a usage limit, you clicking Stop, or the " +
-        "app/computer closing); click Resume to continue.",
+      "- **Failed** — did not finish; read the error message shown. If a saved Claude session exists, " +
+        "the screen also offers **Try resuming** after you correct the problem.",
+      "- **Interrupted — resumable** — stopped partway (a usage limit, temporary internet/DNS/API " +
+        "failure, you clicking Stop, or the app/computer closing); click Resume research to continue.",
       "",
       "## Answering questions from the agent",
       "",
@@ -1537,6 +1538,9 @@
         "kept. Click Resume any time to continue.",
       "- **Usage allowance runs out** → the project becomes Interrupted — resumable; click Resume " +
         "later to continue the same conversation, not start over.",
+      "- **Internet, DNS, or the connection to Claude fails temporarily** → the project becomes " +
+        "Interrupted — resumable; restore the connection and click **Resume research**. Completed " +
+        "work and the same Claude session are preserved.",
       "- **You close the app normally (Ctrl+C in its terminal) while research is running** → it " +
         "stops the research process before exiting, the same as clicking Stop. This is only " +
         "guaranteed for a normal, graceful shutdown — an unavoidable hard kill (e.g. `kill -9`, " +
@@ -1571,6 +1575,8 @@
       "| \"another research run is already active\" | Only one run is allowed at a time — wait for it, or open it to see its status |",
       "| Project shows Needs attention | Open it and follow the displayed action: answer its question, or resume after fixing evidence access |",
       "| Usage limit reached | Wait for it to reset, then click Resume |",
+      "| Can't reach the API server / EAI_AGAIN | Restore internet or DNS, reopen the project, then click Resume research |",
+      "| Recoverable interruption still says Failed | Restart the updated app and reopen the project; older saved states are repaired automatically, and Failed projects with a saved session offer Try resuming |",
       "| No report on a Completed project | Check that project's log file (see `USER_GUIDE.md`, Advanced section) |",
       "| Citation link does nothing | That report likely has a structural issue; look for a Completed — with warnings state |",
       "| Project stuck on Completed — with warnings | Click **Ask Claude to fix this**, or read the checker summary shown and edit the report yourself |",
@@ -2092,33 +2098,46 @@
   }
 
   function renderFailedState(p, right) {
+    var canResume = !!p.sessionId;
     var card = el('<div class="card">' +
       '<h2 style="margin-top:0">Research failed</h2>' +
       '<p class="muted">' + esc(explainError(p.error)) + ' ' + helpLinkHtml("troubleshooting", "Help") + '</p>' +
       (p.error ? '<div class="callout sim"><strong>Details:</strong> ' + esc(p.error) + '</div>' : '') +
+      (canResume ? '<p class="hint">Your saved Claude session is still available. You can try continuing ' +
+        'after correcting the problem; completed work will be preserved.</p>' +
+        '<div id="failed-resume-msg"></div><div class="btn-row">' +
+        '<button class="btn" id="failed-resume-btn">Try resuming</button></div>' : '') +
       '</div>');
     right.appendChild(card);
+    if (canResume) bindResumeButton(card, p, "#failed-resume-btn", "#failed-resume-msg", "Try resuming");
   }
 
   function renderInterruptedState(p, right) {
+    var canResume = !!p.sessionId;
     var card = el('<div class="card">' +
-      '<h2 style="margin-top:0">Interrupted</h2>' +
+      '<h2 style="margin-top:0">Interrupted — resumable</h2>' +
       '<p class="muted">' + esc(explainError(p.error)) + ' Resuming continues the same conversation — it ' +
       'does not restart planning or redo completed work. ' + helpLinkHtml("pausing-resuming-and-failures", "Help") + '</p>' +
       (p.error ? '<div class="callout sim"><strong>Details:</strong> ' + esc(p.error) + '</div>' : '') +
-      '<div id="resume-msg"></div>' +
-      '<div class="btn-row"><button class="btn" id="resume-btn">Resume</button></div></div>');
+      (canResume ? '<div id="resume-msg"></div>' +
+        '<div class="btn-row"><button class="btn" id="resume-btn">Resume research</button></div>' :
+        '<p class="muted">No previous Claude session was recorded, so this project cannot be resumed.</p>') +
+      '</div>');
     right.appendChild(card);
-    var btn = card.querySelector("#resume-btn");
+    if (canResume) bindResumeButton(card, p, "#resume-btn", "#resume-msg", "Resume research");
+  }
+
+  function bindResumeButton(card, p, buttonSelector, messageSelector, idleLabel) {
+    var btn = card.querySelector(buttonSelector);
     btn.addEventListener("click", function () {
       btn.disabled = true;
       btn.textContent = "Resuming…";
-      var msg = card.querySelector("#resume-msg");
+      var msg = card.querySelector(messageSelector);
       apiFetch("/api/projects/" + encodeURIComponent(p.id) + "/resume", { method: "POST", body: {} })
         .then(function () { loadAndRenderServerProject(p.id, document.getElementById("server-ws-slot")); })
         .catch(function (e) {
           btn.disabled = false;
-          btn.textContent = "Resume";
+          btn.textContent = idleLabel;
           msg.innerHTML = "";
           msg.appendChild(el('<div class="msg error" role="alert">' + esc(e.message) + '</div>'));
         });
@@ -2133,7 +2152,8 @@
     if (!errText) return "Something went wrong and no further detail was recorded.";
     if (/not found on path|not available on this machine/.test(t)) return "Claude Code isn't installed or isn't on your PATH.";
     if (/not signed in|auth/.test(t)) return "Claude Code isn't signed in on this machine.";
-    if (/usage limit|rate limit|quota|too many requests|overloaded|try again later/.test(t)) return "Your Claude usage limit was reached during this run.";
+    if (/usage limit|session limit|rate limit|quota|too many requests|overloaded|try again later|resets?\s+(?:at\s+)?\d/.test(t)) return "Your Claude usage limit was reached during this run. Wait for the stated reset time, then resume.";
+    if (/can(?:not|'t) reach the api server|check your internet or dns|eai_again|enotfound|econnreset|econnrefused|etimedout|network error|network (?:is )?unreachable|temporary failure in name resolution|dns error/.test(t)) return "The connection to Claude was temporarily lost. Check your internet connection, then resume.";
     if (/denied|permission/.test(t)) return "An action was blocked by safety settings.";
     if (/exited with status/.test(t)) return "Claude Code stopped unexpectedly.";
     return "The run did not complete successfully.";

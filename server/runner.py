@@ -364,6 +364,17 @@ class Runner:
             self.store.write_run_state(project_id, state)
             return
 
+        # Older versions classified allowance exhaustion and temporary
+        # internet/DNS/API outages as permanent failures. If a resumable
+        # Claude session exists, repair those saved states when the project is
+        # next opened so the browser can offer the Resume action immediately.
+        if (state.get("status") == "failed" and state.get("sessionId") and
+                _looks_like_recoverable_interruption(state.get("error"))):
+            state["status"] = "interrupted"
+            state["stopReason"] = None
+            self.store.write_run_state(project_id, state)
+            return
+
         # Repair status written by older backend versions that treated any
         # syntactically valid report as Completed, even when run.md explicitly
         # recorded that evidence access was blocked. This reconciliation
@@ -663,8 +674,12 @@ class Runner:
                 state["status"] = ("completed" if citation_result.get("ok") is True
                                    else "completed-with-warnings")
                 state["error"] = None
-        elif result_text and _looks_like_usage_limit(result_text):
+        elif result_text and _looks_like_recoverable_interruption(result_text):
             state["status"] = "interrupted"
+            # run.md may still contain the stop reason from an earlier attempt;
+            # the current attempt stopped externally rather than reaching a
+            # research conclusion.
+            state["stopReason"] = None
             state["error"] = _safe_excerpt(result_text)
         elif returncode is None or returncode != 0 or is_error:
             state["status"] = "failed"
@@ -751,11 +766,27 @@ def _stop_reason_message(reason):
 
 
 _USAGE_LIMIT_PATTERNS = re.compile(
-    r"usage limit|rate limit|quota|too many requests|overloaded|try again later", re.I)
+    r"usage limit|session limit|rate limit|quota|too many requests|overloaded|"
+    r"try again later|resets?\s+(?:at\s+)?\d", re.I)
+
+_TRANSIENT_NETWORK_PATTERNS = re.compile(
+    r"can(?:not|'t) reach the api server|check your internet or dns|eai_again|"
+    r"enotfound|econnreset|econnrefused|etimedout|network error|"
+    r"network (?:is )?unreachable|temporary failure in name resolution|dns error",
+    re.I,
+)
 
 
 def _looks_like_usage_limit(text):
     return bool(_USAGE_LIMIT_PATTERNS.search(text or ""))
+
+
+def _looks_like_transient_network_error(text):
+    return bool(_TRANSIENT_NETWORK_PATTERNS.search(text or ""))
+
+
+def _looks_like_recoverable_interruption(text):
+    return _looks_like_usage_limit(text) or _looks_like_transient_network_error(text)
 
 
 def _safe_excerpt(text, cap=2000):

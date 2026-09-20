@@ -58,8 +58,9 @@ loss, but prompt compliance and filesystem writes are not a crash-recovery guara
 compaction and account allowance are different: reload saved state after compaction; wait for an
 account reset when blocked. This project does not itself wait and restart automatically.
 
-For browser-started projects, reopen **My research** after the allowance resets and click
-**Resume**. If the run stopped because it could not access any evidence, it appears as **Needs
+For browser-started projects, reopen **My research** after an allowance reset or after restoring a
+temporary internet/DNS/API connection and click **Resume research**. These interruptions preserve
+the same Claude session and completed work. If the run stopped because it could not access any evidence, it appears as **Needs
 attention** with its saved failure notes and a **Resume research** button. The app resumes the same
 Claude session and preserves the existing plan; it does not label the failure notes as a completed
 answer.

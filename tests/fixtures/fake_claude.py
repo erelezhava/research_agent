@@ -7,7 +7,7 @@ server/app.py end to end.
 
 Controlled entirely by environment variables set by the test:
 - FAKE_CLAUDE_SCENARIO: success | needs_attention | failure | usage_limit |
-  inaccessible_evidence | citation_fail | hang
+  network_error | inaccessible_evidence | citation_fail | hang
 - FAKE_CLAUDE_ARGV_DUMP: if set, the full argv is JSON-dumped there (one
   element per line) so a test can assert exactly what was passed — e.g. that
   a prompt containing shell metacharacters arrived verbatim as data, that no
@@ -107,7 +107,14 @@ def main():
             {"type": "tool_use", "name": "WebSearch", "input": {"query": "test query"}}]}})
         time.sleep(0.05)
         emit({"type": "result", "subtype": "error_usage_limit", "is_error": True,
-              "result": "Claude AI usage limit reached for this session. Try again later.",
+              "result": "You've hit your session limit · resets 1:50pm (Asia/Tbilisi)",
+              "session_id": session_id})
+        return 1
+
+    if scenario == "network_error":
+        time.sleep(0.05)
+        emit({"type": "result", "subtype": "error", "is_error": True,
+              "result": "API Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)",
               "session_id": session_id})
         return 1
 

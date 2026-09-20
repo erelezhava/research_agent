@@ -192,11 +192,13 @@ below, not a weaker permission mode.
   afterward exactly like a usage-limit interruption. A narrow `/stop` endpoint checks the project id
   against the actual active run before terminating anything, so a stale request or a different,
   inactive project can never stop someone else's run.
-- **A usage-limit interruption**: detected from the CLI's own result text (patterns like "usage
-  limit", "rate limit", "quota", "try again later") and shown as **Interrupted**, with a **Resume**
+- **A usage-limit or temporary connection interruption**: detected from the CLI's own result text
+  (including the exact `session limit`/reset-time and `Can't reach the API server`/`EAI_AGAIN`
+  messages observed in real runs) and shown as **Interrupted — resumable**, with a **Resume research**
   button that reconnects the same session via `--resume` — explicitly restating the project's path
   rooting rather than relying only on conversation memory, since CLAUDE.md itself warns that
-  context compaction can lose the transcript.
+  context compaction can lose the transcript. Older recoverable failures are repaired when opened;
+  a genuinely failed run with a saved session still offers a **Try resuming** fallback.
 - **A crash** (of the `claude` process, or of the backend process itself): state lives on disk in
   `projects/<id>/state/run.json`, written atomically, so a server restart re-reads it rather than
   losing it. If the recorded process is confirmed dead and the run never reached a terminal state,
@@ -362,7 +364,8 @@ real Claude allowance consumed): mode (`quick`/`deep`) passed correctly; the app
 preserved exactly, including special characters; shell metacharacters in a prompt proven inert (a
 marker file is asserted never created); unsafe project ids and path-traversal attempts rejected;
 only one run active at a time; successful completion exposes the report; a CLI failure produces a
-clear Failed state; a usage-limit-shaped interruption produces Interrupted, and Resume then
+clear Failed state; exact usage-limit and temporary internet/DNS/API failures produce Interrupted,
+and Resume then
 completes it; state survives a full server restart; the server binds loopback-only; cross-origin
 POSTs are rejected; oversized request bodies are rejected; **Bash is confirmed absent from every
 `--tools` invocation and no disallowed/bypass permission flags are ever passed**; **Stop** correctly
