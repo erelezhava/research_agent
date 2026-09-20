@@ -65,6 +65,11 @@ attention** with its saved failure notes and a **Resume research** button. The a
 Claude session and preserves the existing plan; it does not label the failure notes as a completed
 answer.
 
+If a report stops because its planned research budget was exhausted, the browser shows **Continue
+research**. That resumes the same session and adds one bounded pass focused on unfinished checks;
+it preserves the report and gathered evidence, but uses additional Claude allowance. The **My
+research** list keeps long questions to a short preview so project cards remain easy to scan.
+
 Official Claude Code documentation exposes usage percentages and reset timestamps to a custom
 status-line script when available for the account/session:
 https://code.claude.com/docs/en/statusline
@@ -89,6 +94,10 @@ default; see `ui/README.md` for how to change it) — it does **not** inherit "y
 since there is no interactive session to inherit from. Changing coordinator model does not
 automatically change worker configuration.
 
+The browser's explicit **Continue research** action is a new budget decision: it permits one extra
+bounded pass (Quick: up to 3 collection calls and 2 verification checks; Deep: up to 8 and 5),
+records the extension in `run.md`, and stops with the warning again if important work still remains.
+
 ## Evidence and validation
 CLAUDE.md defines schema version 2. Each task has a readable memo plus structured JSON with
 actual excerpts, qualifications, provenance and retrieval coverage. Reasoning tasks retain their
@@ -110,6 +119,8 @@ only when the checker actually found a structural citation problem. A run that r
 `inaccessible_evidence` or `needs_clarification` is **Needs attention**, even if it wrote a Markdown
 file. `important_uncertainty` and `budget_exhausted` produce **Completed with warnings**. Older
 projects with a falsely clean status are reconciled from their saved stop reason when reopened.
+`budget_exhausted` projects with a saved session offer **Continue research**; this is separate from
+repairing a structural citation problem.
 
 ## Existing records
 This repository ships with **no bundled research runs** — the `findings/`, `reports/`, `runs/`

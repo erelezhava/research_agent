@@ -163,6 +163,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._handle_clarify(parts[0])
                 if len(parts) == 2 and parts[1] == "repair-citations":
                     return self._handle_repair_citations(parts[0])
+                if len(parts) == 2 and parts[1] == "continue-budget":
+                    return self._handle_continue_budget(parts[0])
                 if len(parts) == 2 and parts[1] == "remove":
                     return self._handle_remove(parts[0])
             return self._error(404, "Unknown API endpoint.")
@@ -294,6 +296,21 @@ class Handler(BaseHTTPRequestHandler):
         if not state.get("sessionId"):
             return self._error(409, "No previous session recorded to resume.")
         info = app.runner.repair_citations(pid)
+        self._send_json(202, {"resumed": True, "sessionId": info["sessionId"]})
+
+    def _handle_continue_budget(self, pid):
+        app = self._app()
+        if not storemod.is_safe_id(pid):
+            return self._error(400, "Invalid project id.")
+        if not app.store.exists(pid):
+            return self._error(404, "Project not found.")
+        state = app.store.read_run_state(pid)
+        if (state.get("status") != "completed-with-warnings" or
+                state.get("stopReason") != "budget_exhausted"):
+            return self._error(409, "This project did not stop because its research budget was exhausted.")
+        if not state.get("sessionId"):
+            return self._error(409, "No previous session recorded to continue.")
+        info = app.runner.continue_budget(pid)
         self._send_json(202, {"resumed": True, "sessionId": info["sessionId"]})
 
     def _handle_remove(self, pid):

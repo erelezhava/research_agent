@@ -143,8 +143,9 @@ assumed — worth knowing since some of it is genuinely non-obvious:
   is never used.
 - `--session-id <uuid>` is honored verbatim, and `--resume <uuid>` reliably reconnects with full
   memory — verified with a round-trip secret-word test across two separate invocations. Resume is
-  now used for three separate flows: **Resume** after an interruption, **Continue research** after
-  answering a Needs-attention clarification, and the citation-repair follow-up (see below).
+  now used for four separate flows: **Resume** after an interruption, **Continue research** after
+  answering a Needs-attention clarification, **Continue research** after explicitly extending an
+  exhausted research budget, and the citation-repair follow-up (see below).
 
 ### Authentication and permissions
 
@@ -185,6 +186,10 @@ below, not a weaker permission mode.
 - **A citation check that is missing, times out, or cannot start**: the report also shows
   **Completed with warnings**, because it was not independently validated. It shows the safe reason
   but no repair button, since the checker did not find a specific report defect.
+- **A research budget that runs out before every planned check**: the report remains readable as
+  **Completed with warnings** and offers **Continue research** when a saved session exists. The
+  button explains that it uses more allowance and authorizes one additional bounded pass focused
+  on unfinished checks, rather than restarting or silently removing the workflow's ceiling.
 - **You click Stop** while a run is Starting or Researching: the backend sends the Claude process a
   graceful termination signal (`SIGTERM` to its process group on POSIX; `CTRL_BREAK_EVENT` then
   `taskkill /T /F` on Windows), waits a short grace period, and force-kills only if it hasn't exited.
@@ -261,6 +266,17 @@ structural issue; the backend then reruns the checker and updates the status acc
 checker is missing, times out, or cannot start, the same warning state is used but the repair button
 is withheld: validation was inconclusive and there is no identified report defect for Claude to
 repair.
+
+### Continuing after an exhausted research budget
+
+When the saved stop reason is `budget_exhausted`, the warning card offers **Continue research**.
+The narrow `POST /continue-budget` endpoint accepts only a project in that exact state with a saved
+session. It resumes that session and explicitly authorizes one additional bounded pass while
+preserving the existing report and evidence: Quick adds at most 3 collection calls and 2
+verification checks; Deep adds at most 8 and 5. The resumed coordinator must record the extension
+and actual usage in `run.md`, avoid repeating completed work, and stop with the same warning again
+if material checks still remain. Each click is therefore a visible decision to spend additional
+Claude allowance, not an automatic retry loop.
 
 ### Removing a project
 

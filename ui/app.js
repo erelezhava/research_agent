@@ -1483,7 +1483,8 @@
       "- **Completed** — a report was written and its citations passed an independent structural check.",
       "- **Completed — with warnings** — a report was written, but research ended with a material " +
         "uncertainty or budget limit, the structural citation check found an issue, or the check could not run. The report " +
-        "is still shown. A repair button appears only when a structural issue was actually found.",
+        "is still shown. A budget-limited run offers **Continue research** for one additional bounded pass; " +
+        "a citation repair button appears only when a structural issue was actually found.",
       "- **Failed** — did not finish; read the error message shown. If a saved Claude session exists, " +
         "the screen also offers **Try resuming** after you correct the problem.",
       "- **Interrupted — resumable** — stopped partway (a usage limit, temporary internet/DNS/API " +
@@ -1558,6 +1559,9 @@
         "failure explanation is never labeled as a completed answer.",
       "- **Real uncertainty remains at the end** → the report says so plainly; consider re-running " +
         "in Deep mode.",
+      "- **The research budget is exhausted** → the report remains available with a warning. Click " +
+        "**Continue research** for one additional bounded pass focused on unfinished checks. This " +
+        "preserves the same session and existing evidence, and uses more Claude allowance.",
       "- **A report fails its automatic citation check** → the project becomes **Completed — with " +
         "warnings** rather than an ordinary Completed; the report is still shown, and you can ask " +
         "Claude to fix the specific issue found.",
@@ -1579,7 +1583,7 @@
       "| Recoverable interruption still says Failed | Restart the updated app and reopen the project; older saved states are repaired automatically, and Failed projects with a saved session offer Try resuming |",
       "| No report on a Completed project | Check that project's log file (see `USER_GUIDE.md`, Advanced section) |",
       "| Citation link does nothing | That report likely has a structural issue; look for a Completed — with warnings state |",
-      "| Project stuck on Completed — with warnings | Click **Ask Claude to fix this**, or read the checker summary shown and edit the report yourself |",
+      "| Project shows Completed — with warnings | Follow the action shown: **Continue research** for an exhausted research budget, **Ask Claude to fix this** for a citation defect, or read the limitation when no automatic action applies |",
       "| Citation check unavailable | The report exists, but its citation structure was not validated; read the reason shown and retry after fixing the local checker |",
       "| Can't remove a project | Research must be stopped first; the confirmation text must exactly match the project's title |",
       "",
@@ -1700,15 +1704,17 @@
 
   function serverProjectCard(p) {
     var meta = serverStatusMeta(p.status);
+    var summary = (p.question || "").replace(/\s+/g, " ").trim();
+    if (summary.length > 150) summary = summary.slice(0, 147).trimEnd() + "…";
     var c = el(
       '<article class="card project-card">' +
         '<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">' +
           '<span class="pill ' + meta.pill + '">' + esc(meta.label) + '</span>' +
           '<span class="tag" title="Runs your local Claude Code CLI">Real project</span>' +
         '</div>' +
-        '<h3 style="margin:12px 0 0">' + esc(p.title) + '</h3>' +
+        '<h3 class="project-card-title">' + esc(p.title) + '</h3>' +
         '<p class="meta">Updated ' + esc((p.updatedAt || "").slice(0, 10)) + ' &middot; ' + esc(approachLabel(p.approach)) + '</p>' +
-        '<p class="muted" style="margin:0">' + esc(p.question) + '</p>' +
+        '<p class="muted project-card-summary" title="' + esc(p.question || "") + '">' + esc(summary) + '</p>' +
         '<div class="spacer"></div>' +
         '<div class="foot"><span></span><button class="btn secondary open-btn">Open</button></div>' +
       '</article>'
@@ -2040,6 +2046,7 @@
     var checkFailed = !!(p.citationCheck && p.citationCheck.ok === false);
     var checkUnavailable = !!(p.citationCheck && p.citationCheck.ok == null);
     var researchWarning = !checkFailed && !checkUnavailable && hasWarnings;
+    var budgetExhausted = p.stopReason === "budget_exhausted";
     var citeBadge = "";
     if (p.citationCheck && p.citationCheck.ok === true) citeBadge = '<span class="pill complete">Citation check passed</span>';
     else if (checkFailed) citeBadge = '<span class="pill needs-attention">Citation check found issues</span>';
@@ -2061,8 +2068,17 @@
         '<div id="repair-msg"></div>' +
         '<div class="btn-row">' +
         (checkFailed && p.sessionId ? '<button class="btn" id="repair-btn">Ask Claude to fix this</button>' : '') +
+        (budgetExhausted && p.sessionId ? '<button class="btn" id="continue-budget-btn">Continue research</button>' : '') +
         helpLinkHtml("reading-the-report", "What does this mean?") + '</div></div>');
       right.appendChild(warnCard);
+      if (budgetExhausted) {
+        var budgetNote = el('<div class="callout info"><strong>Want a more complete answer?</strong> ' +
+          (p.sessionId
+            ? 'Continue research keeps this report and all gathered evidence, then runs one additional bounded pass focused on unfinished checks. It uses more of your Claude allowance.'
+            : 'This project has no saved Claude session, so it cannot continue the same run. Start a new project if you need more research.') +
+          '</div>');
+        warnCard.querySelector(".btn-row").before(budgetNote);
+      }
       var repairBtn = warnCard.querySelector("#repair-btn");
       if (repairBtn) {
         repairBtn.addEventListener("click", function () {
@@ -2075,6 +2091,22 @@
             .catch(function (e) {
               repairBtn.disabled = false;
               repairBtn.textContent = "Ask Claude to fix this";
+              msg.appendChild(el('<div class="msg error" role="alert">' + esc(e.message) + '</div>'));
+            });
+        });
+      }
+      var continueBudgetBtn = warnCard.querySelector("#continue-budget-btn");
+      if (continueBudgetBtn) {
+        continueBudgetBtn.addEventListener("click", function () {
+          continueBudgetBtn.disabled = true;
+          continueBudgetBtn.textContent = "Continuing…";
+          var msg = warnCard.querySelector("#repair-msg");
+          msg.innerHTML = "";
+          apiFetch("/api/projects/" + encodeURIComponent(p.id) + "/continue-budget", { method: "POST", body: {} })
+            .then(function () { loadAndRenderServerProject(p.id, document.getElementById("server-ws-slot")); })
+            .catch(function (e) {
+              continueBudgetBtn.disabled = false;
+              continueBudgetBtn.textContent = "Continue research";
               msg.appendChild(el('<div class="msg error" role="alert">' + esc(e.message) + '</div>'));
             });
         });

@@ -251,11 +251,29 @@ h3 { font-size: 1.1rem; margin: 22px 0 8px; }
 .pill.draft { background: var(--surface-2); color: var(--text-muted); }
 .pill.failed { background: var(--danger-soft); color: var(--danger); }
 
-/* Project cards */
-.project-card { display: flex; flex-direction: column; height: 100%; }
-.project-card .meta { color: var(--text-muted); font-size: 0.85rem; margin: 6px 0 12px; }
+/* Project cards: list views stay scannable even when the original question is long. */
+.project-card { display: flex; flex-direction: column; height: 100%; padding: 16px; }
+.project-card-title {
+  margin: 12px 0 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  max-height: 2.7em;
+  overflow: hidden;
+}
+.project-card .meta { color: var(--text-muted); font-size: 0.85rem; margin: 6px 0 8px; }
+.project-card-summary {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  max-height: 2.9em;
+  overflow: hidden;
+}
 .project-card .spacer { flex: 1; }
-.project-card .foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.project-card .foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
 
 /* Forms */
 label.field { display: block; margin: 16px 0 6px; font-weight: 600; }

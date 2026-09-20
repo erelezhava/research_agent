@@ -302,6 +302,37 @@ class OutcomeTests(ServerTestCase):
         status, data = self.request("POST", f"/api/projects/{pid}/resume")
         self.assertEqual(status, 409, data)
 
+    def test_budget_exhausted_can_continue_same_session_with_bounded_prompt(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "budget_exhausted")
+        pid = self.create_project(approach="deep")
+        self.request("POST", f"/api/projects/{pid}/start")
+        first = self.wait_terminal(pid)
+        self.assertEqual(first["status"], "completed-with-warnings")
+        self.assertEqual(first["stopReason"], "budget_exhausted")
+        original_session = first["sessionId"]
+
+        dumpfile = Path(self.tmp.name) / "argv-continue-budget.json"
+        self.set_env("FAKE_CLAUDE_ARGV_DUMP", str(dumpfile))
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        status, data = self.request("POST", f"/api/projects/{pid}/continue-budget")
+        self.assertEqual(status, 202, data)
+        final = self.wait_terminal(pid)
+        self.assertEqual(final["status"], "completed")
+
+        argv = json.loads(dumpfile.read_text())
+        self.assertIn("--resume", argv)
+        self.assertEqual(argv[argv.index("--resume") + 1], original_session)
+        prompt = argv[argv.index("-p") + 1]
+        self.assertIn("explicitly chose Continue research", prompt)
+        self.assertIn("at most 8 collection calls", prompt)
+        self.assertIn("5 verification source checks", prompt)
+        self.assertIn("Do not restart planning", prompt)
+
+    def test_continue_budget_rejected_for_ordinary_project(self):
+        pid = self.create_project()
+        status, data = self.request("POST", f"/api/projects/{pid}/continue-budget")
+        self.assertEqual(status, 409, data)
+
 
 class RestartRecoveryTests(ServerTestCase):
     def test_state_survives_server_restart(self):

@@ -212,6 +212,38 @@ def build_resume_message(project_id):
     )
 
 
+def build_budget_continuation_message(project_id, mode):
+    """Continue a run only after the user explicitly accepts more research.
+
+    The normal workflow correctly stops at its saved budget ceiling.  A click
+    on Continue research is a new, explicit budget decision, so give the
+    resumed coordinator a small additional ceiling rather than an open-ended
+    instruction to keep going.
+    """
+    root_note = f"projects/{project_id}"
+    if mode == "quick":
+        extra_collection, extra_verification, extra_workers = 3, 2, 1
+    else:
+        extra_collection, extra_verification, extra_workers = 8, 5, 2
+    return (
+        f"Resume this run. As at the start of this conversation, \"{root_note}\" is the "
+        f"effective project root: reload run.md from {root_note}/runs/<run_id>/run.md and the "
+        f"evidence already saved under {root_note}/findings/<run_id>/. The user reviewed the "
+        "budget-exhausted warning and explicitly chose Continue research, authorizing one "
+        "additional bounded follow-up pass. Do not restart planning, redo completed tasks, or "
+        "discard the existing report. Focus only on the important unfinished checks and revise "
+        f"the report at {root_note}/reports/<run_id>.md where the new evidence changes or "
+        "qualifies it.\n\n"
+        f"For this additional pass, add at most {extra_collection} collection calls and "
+        f"{extra_verification} verification source checks to the previously recorded ceiling, "
+        f"with at most {extra_workers} worker{'s' if extra_workers != 1 else ''} active at once "
+        "and one additional follow-up round. Record this explicit extension and its actual usage "
+        "in run.md. Stop again with budget_exhausted if material work still remains after this "
+        "pass; do not silently exceed this extension. This session has no Bash tool; a separate "
+        "local process runs the citation checker automatically after this session ends."
+    )
+
+
 def build_clarification_message(project_id, clarification):
     """Used when the user answers a Needs attention project from the browser.
     The clarification is reproduced verbatim as clearly-delimited DATA, with
@@ -415,6 +447,9 @@ class Runner:
     def resume(self, project_id):
         return self._launch(project_id, kind="resume")
 
+    def continue_budget(self, project_id):
+        return self._launch(project_id, kind="continue-budget")
+
     def clarify(self, project_id, text):
         text = storemod.validate_clarification(text)
         return self._launch(project_id, kind="clarify", clarification=text)
@@ -473,6 +508,8 @@ class Runner:
                 elif kind == "repair":
                     detail = (state.get("citationCheck") or {}).get("detail")
                     prompt = build_repair_message(project_id, detail)
+                elif kind == "continue-budget":
+                    prompt = build_budget_continuation_message(project_id, meta.get("approach"))
                 else:
                     prompt = build_resume_message(project_id)
 

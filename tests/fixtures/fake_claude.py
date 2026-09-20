@@ -7,7 +7,7 @@ server/app.py end to end.
 
 Controlled entirely by environment variables set by the test:
 - FAKE_CLAUDE_SCENARIO: success | needs_attention | failure | usage_limit |
-  network_error | inaccessible_evidence | citation_fail | hang
+  network_error | inaccessible_evidence | budget_exhausted | citation_fail | hang
 - FAKE_CLAUDE_ARGV_DUMP: if set, the full argv is JSON-dumped there (one
   element per line) so a test can assert exactly what was passed — e.g. that
   a prompt containing shell metacharacters arrived verbatim as data, that no
@@ -178,17 +178,20 @@ def main():
               "result": "Report complete.", "session_id": session_id})
         return 0
 
-    # default: success, with a real report + findings + valid citations so the
+    # default success and budget-exhausted outcomes both write a real report
+    # with valid citations so the backend's independent citation checker can
+    # run.  The only difference is the workflow stop reason.
+    stop_reason = "budget_exhausted" if scenario == "budget_exhausted" else "supported_within_scope"
     # server's own citation-checker confirmation (defense in depth) also passes
     if project_id:
         if resumed:
             write(f"projects/{project_id}/runs/{run_id}/run.md",
                   "# Run: run-fake-1\n\n## Phase\nsynthesis -> complete (resumed)\n\n"
-                  "## Stop reason\n**supported_within_scope**\n")
+                  f"## Stop reason\n**{stop_reason}**\n")
         else:
             write(f"projects/{project_id}/runs/{run_id}/run.md",
                   "# Run: run-fake-1\n\n## Question\nTest question.\n\n"
-                  "## Phase\nsynthesis -> complete\n\n## Stop reason\n**supported_within_scope**\n")
+                  f"## Phase\nsynthesis -> complete\n\n## Stop reason\n**{stop_reason}**\n")
         write(f"projects/{project_id}/findings/{run_id}/t1.md", "## Answer\nFake finding.\nstatus: complete\n")
         bundle = {
             "schema_version": 2, "run_id": run_id, "task_id": "t1", "scope_key": "v1",
