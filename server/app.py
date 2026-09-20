@@ -19,6 +19,7 @@ full list this implements):
 """
 import json
 import mimetypes
+import signal
 import sys
 import threading
 import time
@@ -156,6 +157,14 @@ class Handler(BaseHTTPRequestHandler):
                     return self._handle_start(parts[0])
                 if len(parts) == 2 and parts[1] == "resume":
                     return self._handle_resume(parts[0])
+                if len(parts) == 2 and parts[1] == "stop":
+                    return self._handle_stop(parts[0])
+                if len(parts) == 2 and parts[1] == "clarify":
+                    return self._handle_clarify(parts[0])
+                if len(parts) == 2 and parts[1] == "repair-citations":
+                    return self._handle_repair_citations(parts[0])
+                if len(parts) == 2 and parts[1] == "remove":
+                    return self._handle_remove(parts[0])
             return self._error(404, "Unknown API endpoint.")
         except storemod.ValidationError as exc:
             return self._error(400, str(exc))
@@ -177,6 +186,7 @@ class Handler(BaseHTTPRequestHandler):
             "ok": True,
             "activeRun": app.runner.active_run(),
             "claude": app.health,
+            "model": app.runner.model,
         })
 
     def _handle_list_projects(self):
@@ -237,6 +247,69 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(409, "No previous session recorded to resume.")
         info = app.runner.resume(pid)
         self._send_json(202, {"resumed": True, "sessionId": info["sessionId"]})
+
+    def _handle_stop(self, pid):
+        app = self._app()
+        if not storemod.is_safe_id(pid):
+            return self._error(400, "Invalid project id.")
+        if not app.store.exists(pid):
+            return self._error(404, "Project not found.")
+        app.runner.stop(pid)  # RunnerError -> 409 via the shared do_POST handler
+        self._send_json(202, {"stopping": True})
+
+    def _handle_clarify(self, pid):
+        app = self._app()
+        if not storemod.is_safe_id(pid):
+            return self._error(400, "Invalid project id.")
+        if not app.store.exists(pid):
+            return self._error(404, "Project not found.")
+        data = self._read_json_body()
+        if data is None:
+            return
+        state = app.store.read_run_state(pid)
+        if state.get("status") != "needs-attention":
+            return self._error(409, "This project is not waiting on a clarification.")
+        if not state.get("sessionId"):
+            return self._error(409, "No previous session recorded — start a new project instead.")
+        try:
+            text = storemod.validate_clarification(data.get("text"))
+        except storemod.ValidationError as exc:
+            return self._error(400, str(exc))
+        info = app.runner.clarify(pid, text)
+        self._send_json(202, {"resumed": True, "sessionId": info["sessionId"]})
+
+    def _handle_repair_citations(self, pid):
+        app = self._app()
+        if not storemod.is_safe_id(pid):
+            return self._error(400, "Invalid project id.")
+        if not app.store.exists(pid):
+            return self._error(404, "Project not found.")
+        state = app.store.read_run_state(pid)
+        if state.get("status") != "completed-with-warnings":
+            return self._error(409, "This project has no citation warnings to repair.")
+        if (state.get("citationCheck") or {}).get("ok") is not False:
+            return self._error(409, "The citation check did not find a repairable structural problem.")
+        if not state.get("sessionId"):
+            return self._error(409, "No previous session recorded to resume.")
+        info = app.runner.repair_citations(pid)
+        self._send_json(202, {"resumed": True, "sessionId": info["sessionId"]})
+
+    def _handle_remove(self, pid):
+        app = self._app()
+        if not storemod.is_safe_id(pid):
+            return self._error(400, "Invalid project id.")
+        data = self._read_json_body()
+        if data is None:
+            return
+        try:
+            app.runner.remove_project(pid, data.get("confirmTitle"))
+        except storemod.ValidationError as exc:
+            return self._error(400, str(exc))
+        except runnermod.RunnerError as exc:
+            if str(exc) == "project not found":
+                return self._error(404, "Project not found.")
+            raise
+        self._send_json(200, {"removed": True})
 
     # -- static file serving (allowlisted, traversal-safe) -----------------
     def _serve_static(self, path):
@@ -301,7 +374,8 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--host", default="127.0.0.1", help="must be a loopback address")
     parser.add_argument("--claude-bin", default=None)
-    parser.add_argument("--model", default=None)
+    parser.add_argument("--model", default=None,
+                         help="coordinator model Claude Code runs as (default: sonnet)")
     args = parser.parse_args()
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
@@ -315,19 +389,41 @@ def main():
     except OSError as exc:
         print(f"Could not bind {args.host}:{args.port} — {exc}", file=sys.stderr)
         return 1
+    except ValueError as exc:
+        print(f"Bad --model value: {exc}", file=sys.stderr)
+        return 2
 
     print(f"READY http://{args.host}:{args.port}/", flush=True)
+    print(f"Coordinator model: {httpd.app.runner.model}", flush=True)
     if not httpd.app.health.get("claudeFound"):
         print("NOTE: Claude Code CLI was not found on PATH — Start research will show "
               "a Needs attention state until it is installed.", file=sys.stderr)
     elif not httpd.app.health.get("authenticated"):
         print("NOTE: Claude Code is installed but not signed in — run 'claude auth login'.",
               file=sys.stderr)
+
+    # A graceful shutdown (Ctrl+C, or SIGTERM from whatever stopped the
+    # launcher/backend) must stop any Claude process it started before this
+    # process exits — otherwise it would keep running and consuming Claude
+    # allowance with nothing left tracking it. This only covers a normal
+    # signal-based shutdown; an unavoidable hard kill (SIGKILL, a power
+    # loss, or an OS crash) gives no process any chance to run cleanup code,
+    # so it cannot be guaranteed here or anywhere else.
+    def _handle_term_signal(signum, frame):  # noqa: ARG001 - signal handler signature
+        raise KeyboardInterrupt()
+    if hasattr(signal, "SIGTERM"):
+        try:
+            signal.signal(signal.SIGTERM, _handle_term_signal)
+        except (ValueError, OSError):
+            pass  # e.g. not the main thread — best-effort only
+
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        print("Stopping any active research process…", file=sys.stderr)
+        httpd.app.runner.stop_all()
         httpd.server_close()
     return 0
 

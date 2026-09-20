@@ -79,14 +79,15 @@
     // fails (e.g. quota). Once unhealthy it stays warned for the session.
     saveHealthy: storageOK,
     // Server connection: only true when this page is being served by the local
-    // Python backend (ui/launch.sh / server/app.py) rather than opened as a
+    // Python backend (start.py / ui/launch.sh / server/app.py) rather than opened as a
     // plain file. When true, approving a brief creates a REAL project on disk
     // and Start research launches the actual Claude Code CLI. When false
     // (or while still checking), every existing standalone/localStorage
     // behavior is preserved exactly as before — nothing here changes it.
     connected: false,
     serverHealth: null,
-    serverProjects: []
+    serverProjects: [],
+    model: null   // the coordinator model the backend is configured with (e.g. "sonnet")
   };
 
   // Record the outcome of a write. Never claims success it didn't get; on failure
@@ -144,16 +145,33 @@
   // nesting by indentation, tables, blockquotes, inline code, bold, italic,
   // markdown links, [n] citation chips, and standalone source ("[n] …") lines.
   function renderInline(text) {
+    // Inline code is protected with a placeholder before any other inline
+    // processing runs, and restored last — otherwise text like `[3]` inside
+    // backticks gets its *contents* re-matched by the later bold/link/
+    // citation passes (they operate on the string, not the DOM, so a `[3]`
+    // sitting inside an already-built <code> span is still plain matchable
+    // text) and can turn into a citation link pointing at a source that
+    // doesn't exist on the current page.
+    var codeSpans = [];
     var s = esc(text);
-    s = s.replace(/`([^`]+)`/g, function (_, c) { return "<code>" + c + "</code>"; });
+    s = s.replace(/`([^`]+)`/g, function (_, c) {
+      codeSpans.push(c);
+      return "CODE" + (codeSpans.length - 1) + "";
+    });
     s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");     // bold
     s = s.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");               // italic
-    s = s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, function (_, label, url) {
+    // Links: either an external http(s) URL, or a same-page "#anchor" using
+    // only the characters slugify() ever generates. Nothing else is ever
+    // accepted as a link target here — no javascript:, data:, or other
+    // scheme, and no malformed URL, can become a clickable href.
+    s = s.replace(/\[([^\]]+)\]\((https?:[^)\s]+|#[a-z0-9][a-z0-9-]*)\)/g, function (_, label, url) {
+      if (url.charAt(0) === "#") return '<a href="' + url + '">' + label + "</a>";
       return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + label + "</a>";
     });
     s = s.replace(/\[(\d+)\]/g, function (_, n) {
       return '<a class="cite" href="#src-' + n + '" data-cite="' + n + '">[' + n + "]</a>";
     });
+    s = s.replace(/CODE(\d+)/g, function (_, i) { return "<code>" + codeSpans[+i] + "</code>"; });
     return s;
   }
 
@@ -498,11 +516,13 @@
       '</div>' +
 
       (state.connected
-        ? '<p class="small muted">Connected via the local backend started by ui/launch.sh. Research runs using your ' +
-          'own Claude Code sign-in on this machine — no separate account or API key is needed here, and nothing is sent ' +
-          'anywhere beyond your own computer\'s Claude Code CLI.</p>'
-        : '<p class="small muted">No account or setup is needed to explore this prototype. Open it via ui/launch.sh to ' +
-          'connect it to your local Claude Code installation and run real research.</p>') +
+        ? '<p class="small muted">Connected through the local backend started by <code>start.py</code> or ' +
+          '<code>ui/launch.sh</code>. The browser talks only to that local backend; it launches your signed-in ' +
+          'Claude Code CLI, which sends the research request and relevant working context to Claude and accesses ' +
+          'web sources as needed. No separate API key is used.</p>'
+        : '<p class="small muted">No account or setup is needed to explore this prototype. Run ' +
+          '<code>python3 start.py</code> (or <code>bash ui/launch.sh</code>) to connect it to your local Claude Code ' +
+          'installation and run real research.</p>') +
 
       '<p class="small"><button class="btn ghost small" id="w-reintro" style="padding-left:0">↩ Show the introduction again</button></p>';
 
@@ -667,10 +687,9 @@
       '<textarea id="q" aria-describedby="q-hint" placeholder="e.g. I want a low-maintenance bike for a flat 10 km city commute — which type should I get and what should I check before buying?"></textarea>' +
       '<div id="q-err"></div>' +
 
-      '<label class="field" for="file">Add documents (optional)</label>' +
-      '<p class="hint">Datasheets, notes, PDFs — anything that helps.</p>' +
-      '<div class="callout sim"><strong>Prototype note:</strong> selected files are recorded by name only and carried into the brief as context. ' +
-      'They are <strong>not uploaded, opened, or read</strong> — document processing is not part of this preview.</div>' +
+      '<label class="field" for="file">Mention documents you have (optional)</label>' +
+      '<p class="hint" id="file-note">Only file <strong>names</strong> are noted — nothing is uploaded, opened, or read. ' +
+      'If a document\'s content matters, describe the relevant details in your question above instead.</p>' +
       '<input type="file" id="file" multiple aria-describedby="file-note" />' +
       '<ul class="filelist" id="filelist"></ul>' +
 
@@ -1408,20 +1427,21 @@
       "",
       (state.connected
         ? "This copy of the app is **connected** to your local Claude Code — approving a brief creates a real project, and Start research runs real research."
-        : "This copy of the app is in **standalone preview mode** — no backend is connected, so example content is shown and nothing here runs real research. Launch it with `bash ui/launch.sh` from a terminal to connect it."),
+        : "This copy of the app is in **standalone preview mode** — no backend is connected, so example content is shown and nothing here runs real research. Launch it with `python3 start.py` (or `bash ui/launch.sh`) from a terminal to connect it."),
       "",
       "## Starting research",
       "",
       "1. Click **New research**.",
       "2. Describe your question in ordinary language — a sentence or two is enough.",
-      "3. Optionally attach documents (currently their *names* are recorded only — see " +
-        "[Project files and privacy](#project-files-and-privacy)).",
+      "3. Optionally mention documents you have — only their *names* are recorded, nothing is " +
+        "uploaded or read (see [Project files and privacy](#project-files-and-privacy)).",
       "4. Open **Advanced options** to set a timeframe, if useful. Optional.",
       "5. Continue, and answer any follow-up questions that are useful — all optional, skip freely.",
       "6. On **Research approach**, compare the Quick and Deep prompts (see below) and pick one.",
       "7. Edit the chosen prompt if you want to sharpen the focus.",
       "8. Review the final brief and edit anything that isn't quite right.",
-      "9. Approve it, then click **Start research** on the next screen.",
+      "9. Approve it, then click **Start research** on the next screen — which also shows the " +
+        "model Claude Code will run as, before anything starts.",
       "10. Leave the app open, or come back later — check **My research** any time.",
       "",
       "## Quick versus Deep research",
@@ -1447,20 +1467,29 @@
       "",
       "- **Ready to start** — approved, not yet running. Click Start research.",
       "- **Starting…** — the research process is being launched.",
-      "- **Researching** — actively running; a short real activity list updates automatically.",
+      "- **Researching** — actively running; a short real activity list updates automatically. A " +
+        "**Stop research** button is available here — it preserves everything done so far so you " +
+        "can Resume later.",
       "- **Needs attention** — stopped before a report, usually needing something from you (see below).",
-      "- **Completed** — a report was written; open the project to read it.",
+      "- **Completed** — a report was written and its citations passed an independent structural check.",
+      "- **Completed — with warnings** — a report was written, but that structural check found a " +
+        "real issue (e.g. a citation with no matching source), or the check could not run. The report " +
+        "is still shown. A repair button appears only when a structural issue was actually found.",
       "- **Failed** — did not finish; read the error message shown.",
-      "- **Interrupted — resumable** — stopped partway (a usage limit, or the app/computer closing); click Resume to continue.",
+      "- **Interrupted — resumable** — stopped partway (a usage limit, you clicking Stop, or the " +
+        "app/computer closing); click Resume to continue.",
       "",
       "## Answering questions from the agent",
       "",
       "When research can't responsibly continue without something only you know, a project shows " +
-        "**Needs attention** with its own saved notes explaining what's missing. Address it by " +
-        "starting a new project (or editing your prompt before starting) with that detail included " +
-        "— for example the exact component model or revision, your budget, whether you already " +
-        "have a stack-up or schematic, the required frequency range, or whether a datasheet is " +
-        "available. Specific detail like this can materially improve the answer.",
+        "**Needs attention** with its own saved notes explaining what's missing. Type your answer " +
+        "into the **Add clarification** box right there and click **Continue research** — this " +
+        "resumes the same conversation with your answer, it does not start over. Good answers are " +
+        "specific: the exact component model or revision, your budget, whether you already have a " +
+        "stack-up or schematic, the required frequency range, or whether a datasheet is available. " +
+        "Specific detail like this can materially improve the answer. (If a project has no " +
+        "resumable session recorded — rare — the screen says so and starting a fresh project with " +
+        "the detail included is the only option.)",
       "",
       "## Reading the report",
       "",
@@ -1477,25 +1506,45 @@
         "your request, source names, progress notes, gathered evidence, verification results, the " +
         "final report, and a local log. The app itself only ever listens on `127.0.0.1` (your own " +
         "computer) — but doing research does send your question and findings to Claude, and fetches " +
-        "relevant web pages, since that's what research requires. **Documents you select are not " +
+        "relevant web pages, since that's what research requires. Browser-started Claude has no " +
+        "general command shell or unrelated account connectors, but its file permissions cover this " +
+        "repository as a whole. Keeping writes inside the chosen project folder is a workflow rule, " +
+        "not a separate operating-system sandbox, so treat the app folder as a trusted workspace. " +
+        "**Documents you select are not " +
         "processed** — only their file names are recorded, nothing is uploaded or read. Clearing " +
         "your browser's storage only affects draft questions in standalone preview mode — it never " +
-        "touches real project folders, which you remove manually if you want to delete them.",
+        "touches real project folders. To remove a real project, open it and use **Remove this " +
+        "project** at the bottom of the page — it moves the folder into a local, recoverable trash " +
+        "location rather than deleting it outright, and its log may contain your question, sources, " +
+        "and Claude's output, so remove it if you no longer want that kept.",
       "",
       "## Pausing, resuming, and failures",
       "",
+      "- **You click Stop research** → the run stops within a few seconds (asked nicely first, then " +
+        "forced only if needed) and becomes Interrupted — resumable, with everything done so far " +
+        "kept. Click Resume any time to continue.",
       "- **Usage allowance runs out** → the project becomes Interrupted — resumable; click Resume " +
         "later to continue the same conversation, not start over.",
-      "- **You close the app or your computer shuts down mid-run** → reopening the app corrects the " +
-        "status to Interrupted — resumable if a session was already recorded.",
+      "- **You close the app normally (Ctrl+C in its terminal) while research is running** → it " +
+        "stops the research process before exiting, the same as clicking Stop. This is only " +
+        "guaranteed for a normal, graceful shutdown — an unavoidable hard kill (e.g. `kill -9`, " +
+        "closing the terminal window's process abruptly, or the computer losing power) gives no " +
+        "program, including this one, any chance to clean up, so that case is not guaranteed.",
+      "- **The app or your computer closes/crashes unexpectedly mid-run** → reopening the app " +
+        "corrects the status to Interrupted — resumable if a session was already recorded.",
       "- **A permission Claude would need isn't already granted** → that specific action is safely " +
-        "declined; a fixed, narrow set of actions is pre-approved for unattended research.",
+        "declined; a fixed, narrow set of actions is pre-approved for unattended research, and it " +
+        "does not include a general command shell.",
       "- **A source can't be opened** → recorded as a gap in the evidence, not treated as proof of " +
         "anything.",
       "- **Real uncertainty remains at the end** → the report says so plainly; consider re-running " +
         "in Deep mode.",
-      "- **A report fails its automatic citation check** → it still completes and is still shown, " +
-        "with a visible warning badge.",
+      "- **A report fails its automatic citation check** → the project becomes **Completed — with " +
+        "warnings** rather than an ordinary Completed; the report is still shown, and you can ask " +
+        "Claude to fix the specific issue found.",
+      "- **The citation check cannot run** → the project also becomes **Completed — with warnings**, " +
+        "but no repair button is shown because no structural defect was identified; the screen shows " +
+        "whether the checker was missing, timed out, or could not start.",
       "",
       "## Troubleshooting",
       "",
@@ -1508,7 +1557,10 @@
       "| Project shows Needs attention | See [Answering questions from the agent](#answering-questions-from-the-agent) above |",
       "| Usage limit reached | Wait for it to reset, then click Resume |",
       "| No report on a Completed project | Check that project's log file (see `USER_GUIDE.md`, Advanced section) |",
-      "| Citation link does nothing | That report likely has a structural issue; the citation-check badge usually flags it too |",
+      "| Citation link does nothing | That report likely has a structural issue; look for a Completed — with warnings state |",
+      "| Project stuck on Completed — with warnings | Click **Ask Claude to fix this**, or read the checker summary shown and edit the report yourself |",
+      "| Citation check unavailable | The report exists, but its citation structure was not validated; read the reason shown and retry after fixing the local checker |",
+      "| Can't remove a project | Research must be stopped first; the confirmation text must exactly match the project's title |",
       "",
       "For full installation and update instructions, the exact command-line details, and the " +
         "project folder schema, see `USER_GUIDE.md` in the project's main folder."
@@ -1564,11 +1616,18 @@
     return apiFetch("/api/health", { timeout: 1800 }).then(function (data) {
       state.connected = true;
       state.serverHealth = data.claude || null;
+      state.model = data.model || null;
       updateChromeForConnection();
       return true;
     }).catch(function () {
+      // Standalone mode (opened as a plain file, or no backend reachable):
+      // the page shell starts with neutral "checking…" text specifically so
+      // it never has to show a wrong claim while this resolves — update it
+      // here too, not only on the connected branch above.
       state.connected = false;
       state.serverHealth = null;
+      state.model = null;
+      updateChromeForConnection();
       return false;
     });
   }
@@ -1587,9 +1646,9 @@
     var foot = document.getElementById("app-foot");
     if (foot) {
       foot.innerHTML = state.connected
-        ? "Deep Research · Connected to your local Claude Code CLI. Approved briefs create real projects, and " +
-          "Start research runs the real workflow using your own Claude Code sign-in — nothing here calls a paid " +
-          "API directly or bypasses your account. The example projects and the sample report elsewhere in this " +
+        ? "Deep Research · Connected to your local Claude Code CLI. The local interface launches Claude Code, " +
+          "which communicates with Claude and relevant web sources using your existing sign-in; no separate API " +
+          "key is used. The example projects and the sample report elsewhere in this " +
           "app are still <strong>fictional, made-up content</strong>."
         : "Deep Research prototype · This is a design preview to explore the experience. It does not connect to Claude, " +
           "call any paid service, or start real research. The example projects and the sample report are " +
@@ -1612,6 +1671,7 @@
     "researching": { label: "Researching", pill: "in-progress" },
     "needs-attention": { label: "Needs attention", pill: "needs-attention" },
     "completed": { label: "Completed", pill: "complete" },
+    "completed-with-warnings": { label: "Completed — with warnings", pill: "needs-attention" },
     "failed": { label: "Failed", pill: "failed" },
     "interrupted": { label: "Interrupted — resumable", pill: "needs-attention" }
   };
@@ -1668,6 +1728,58 @@
     });
   }
 
+  // A safe, explicit-confirmation Remove action: the user must re-type the
+  // project's own title (checked here, and again by the backend — never
+  // trusted from the client alone) before anything happens. Refused while
+  // the project is the active run (the backend enforces this too).
+  function renderRemoveSection(p) {
+    var active = p.status === "starting" || p.status === "researching";
+    var box = el('<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Remove this project</h3></div>');
+    if (active) {
+      box.appendChild(el('<p class="small muted">Stop research before removing this project.</p>'));
+      return box;
+    }
+    box.appendChild(el('<p class="small muted">Moves it to a local, recoverable trash folder — it is not ' +
+      'deleted outright. Its log may contain your question, sources, and Claude\'s output, so remove it if ' +
+      'you no longer want that kept.</p>'));
+    var toggle = el('<button class="btn ghost small">Remove…</button>');
+    box.appendChild(toggle);
+    var form = el('<div hidden></div>');
+    form.innerHTML =
+      '<label class="field" for="remove-confirm">Type the project title to confirm: <strong>' + esc(p.title) + '</strong></label>' +
+      '<input type="text" id="remove-confirm" autocomplete="off" />' +
+      '<div id="remove-msg"></div>' +
+      '<div class="btn-row"><button class="btn" id="remove-confirm-btn" disabled>Remove project</button> ' +
+      '<button class="btn ghost small" id="remove-cancel-btn">Cancel</button></div>';
+    box.appendChild(form);
+    toggle.addEventListener("click", function () {
+      toggle.hidden = true;
+      form.hidden = false;
+      form.querySelector("#remove-confirm").focus();
+    });
+    var input = form.querySelector("#remove-confirm");
+    var confirmBtn = form.querySelector("#remove-confirm-btn");
+    input.addEventListener("input", function () { confirmBtn.disabled = input.value !== p.title; });
+    form.querySelector("#remove-cancel-btn").addEventListener("click", function () {
+      form.hidden = true;
+      toggle.hidden = false;
+      input.value = "";
+      confirmBtn.disabled = true;
+    });
+    confirmBtn.addEventListener("click", function () {
+      confirmBtn.disabled = true;
+      var msg = form.querySelector("#remove-msg");
+      msg.innerHTML = "";
+      apiFetch("/api/projects/" + encodeURIComponent(p.id) + "/remove", { method: "POST", body: { confirmTitle: input.value } })
+        .then(function () { navTo("projects"); })
+        .catch(function (e) {
+          confirmBtn.disabled = false;
+          msg.appendChild(el('<div class="msg error" role="alert">' + esc(e.message) + '</div>'));
+        });
+    });
+    return box;
+  }
+
   function renderServerProject(p, slot) {
     slot.innerHTML = "";
     var meta = serverStatusMeta(p.status);
@@ -1686,10 +1798,18 @@
     var briefHtml = '<div class="card side-card"><h3 style="margin-top:0">Approved brief</h3>' +
       '<p><strong>Approach:</strong> ' + esc(approachLabel(p.approach)) + '</p>' +
       '<p><strong>Depth:</strong> ' + esc(p.depth || "") + ' &nbsp;·&nbsp; <strong>How current:</strong> ' + esc(p.timeframe || "") + '</p>';
+    if (state.model) briefHtml += '<p><strong>Model:</strong> ' + esc(state.model) + '</p>';
     if (p.inScope) briefHtml += '<p><strong>In scope:</strong> ' + esc(p.inScope) + '</p>';
     if (p.outScope) briefHtml += '<p><strong>Out of scope:</strong> ' + esc(p.outScope) + '</p>';
+    var ctxFiles = (p.context && p.context.files) || [];
+    if (ctxFiles.length) {
+      briefHtml += '<p style="margin-bottom:4px"><strong>Documents mentioned</strong> ' +
+        '<span class="small muted">(names only, never uploaded or read)</span>:</p><ul style="margin-top:0">' +
+        ctxFiles.map(function (f) { return "<li>📄 " + esc(f) + "</li>"; }).join("") + "</ul>";
+    }
     briefHtml += '<p style="margin-bottom:4px"><strong>Prompt:</strong></p><div class="prompt-quote">' + esc(p.selectedPrompt || "") + '</div></div>';
     left.appendChild(el(briefHtml));
+    left.appendChild(renderRemoveSection(p));
     grid.appendChild(left);
     grid.appendChild(right);
     slot.appendChild(grid);
@@ -1697,7 +1817,7 @@
     if (p.status === "ready") return renderReadyState(p, right);
     if (p.status === "starting" || p.status === "researching") return renderRunningState(p, right, left);
     if (p.status === "needs-attention") return renderNeedsAttentionState(p, right);
-    if (p.status === "completed") return renderCompletedState(p, right);
+    if (p.status === "completed" || p.status === "completed-with-warnings") return renderCompletedState(p, right);
     if (p.status === "failed") return renderFailedState(p, right);
     if (p.status === "interrupted") return renderInterruptedState(p, right);
     right.appendChild(el('<div class="card"><p class="muted">Unknown status: ' + esc(p.status) + '</p></div>'));
@@ -1708,9 +1828,12 @@
       '<h2 style="margin-top:0">Ready to start</h2>' +
       '<p class="muted">Review the approach and prompt on the left, then start research.</p>' +
       '<div class="callout info"><strong>Starting will use your Claude Code allowance</strong> (the same ' +
-      'subscription/session you use in the terminal). This launches the real research workflow — it reads and ' +
-      'writes files under this project’s own folder and can search the web. Only one research run can be ' +
-      'active at a time in this prototype.</div>' +
+      'subscription/session you use in the terminal)' + (state.model ? ', running as the <strong>' + esc(state.model) +
+          '</strong> model' : '') + '. The local backend sends the request and relevant working context through ' +
+          'Claude Code to Claude and accesses web sources as needed. The workflow is instructed to keep its research ' +
+          'files under this project’s folder; current Claude Code file permissions are repository-wide rather than an ' +
+          'OS-level per-project sandbox. Use this app folder as a trusted workspace. Only one research run can be ' +
+          'active at a time.</div>' +
       '<div id="start-msg"></div>' +
       '<div class="btn-row"><button class="btn" id="start-btn">Start research</button>' +
       helpLinkHtml("starting-research", "Show me how →") + '</div>' +
@@ -1738,10 +1861,28 @@
       '<p class="muted">This is live status from the actual run — not simulated. It updates automatically.</p>' +
       '<div id="phase-slot"></div>' +
       '<h3>Recent activity</h3><div id="activity-slot" class="progress-item-list"></div>' +
+      '<div id="stop-msg"></div>' +
+      '<div class="btn-row"><button class="btn secondary" id="stop-btn">Stop research</button></div>' +
+      '<p class="small muted" style="margin-top:6px">Stopping preserves everything done so far — you can ' +
+      'Resume the same run afterward.</p>' +
       '</div>');
     right.appendChild(card);
     renderPhase(p, card.querySelector("#phase-slot"));
     renderActivity(p, card.querySelector("#activity-slot"));
+    var stopBtn = card.querySelector("#stop-btn");
+    stopBtn.addEventListener("click", function () {
+      stopBtn.disabled = true;
+      stopBtn.textContent = "Stopping…";
+      var msg = card.querySelector("#stop-msg");
+      msg.innerHTML = "";
+      apiFetch("/api/projects/" + encodeURIComponent(p.id) + "/stop", { method: "POST", body: {} })
+        .then(function () { loadAndRenderServerProject(p.id, document.getElementById("server-ws-slot")); })
+        .catch(function (e) {
+          stopBtn.disabled = false;
+          stopBtn.textContent = "Stop research";
+          msg.appendChild(el('<div class="msg error" role="alert">' + esc(e.message) + '</div>'));
+        });
+    });
     var attn = el('<div class="card side-card" style="margin-top:16px"><h3 style="margin-top:0">Progress</h3>' +
       '<p class="tag">Live</p><p class="small muted">Task status shown here comes from the run’s own saved ' +
       'notes (left panel and phase above), not a simulated checklist.</p></div>');
@@ -1787,12 +1928,92 @@
       right.appendChild(doc);
       doc.querySelector("#attn-doc").innerHTML = renderMarkdown(p.runMarkdown);
     }
+
+    var replyCard = el('<div class="card"></div>');
+    right.appendChild(replyCard);
+    if (!p.sessionId) {
+      // No resumable session recorded (rare — e.g. a very early interruption):
+      // continuing this exact conversation isn't possible, so say so plainly
+      // rather than offering a form that can't work.
+      replyCard.innerHTML = '<h3 style="margin-top:0">Add clarification</h3>' +
+        '<p class="muted">This project has no previous session recorded, so it can\'t be continued from ' +
+        'here. Start a new research project with the missing detail included in your question instead.</p>';
+      return;
+    }
+    replyCard.innerHTML =
+      '<h3 style="margin-top:0">Add clarification</h3>' +
+      '<p class="hint">Answer what it needs above, in your own words — for example the exact part number, ' +
+      'your budget, or whether you already have a datasheet.</p>' +
+      '<label class="field sr-only" for="clarify-text">Add clarification</label>' +
+      '<textarea id="clarify-text" placeholder="e.g. It\'s a VSC7552-V/5CC, budget is about 40 EUR."></textarea>' +
+      '<div id="clarify-msg"></div>' +
+      '<div class="btn-row"><button class="btn" id="clarify-btn">Continue research</button></div>';
+    var clarifyBtn = replyCard.querySelector("#clarify-btn");
+    var clarifyTa = replyCard.querySelector("#clarify-text");
+    clarifyBtn.addEventListener("click", function () {
+      var msg = replyCard.querySelector("#clarify-msg");
+      msg.innerHTML = "";
+      var text = clarifyTa.value.trim();
+      if (!text) {
+        msg.appendChild(el('<div class="msg error" role="alert">Please add a few words before continuing.</div>'));
+        clarifyTa.focus();
+        return;
+      }
+      clarifyBtn.disabled = true;
+      clarifyBtn.textContent = "Continuing…";
+      apiFetch("/api/projects/" + encodeURIComponent(p.id) + "/clarify", { method: "POST", body: { text: text } })
+        .then(function () { loadAndRenderServerProject(p.id, document.getElementById("server-ws-slot")); })
+        .catch(function (e) {
+          clarifyBtn.disabled = false;
+          clarifyBtn.textContent = "Continue research";
+          msg.appendChild(el('<div class="msg error" role="alert">' + esc(e.message) + '</div>'));
+        });
+    });
   }
 
   function renderCompletedState(p, right) {
+    var hasWarnings = p.status === "completed-with-warnings";
+    var checkFailed = !!(p.citationCheck && p.citationCheck.ok === false);
+    var checkUnavailable = !!(p.citationCheck && p.citationCheck.ok == null);
     var citeBadge = "";
     if (p.citationCheck && p.citationCheck.ok === true) citeBadge = '<span class="pill complete">Citation check passed</span>';
-    else if (p.citationCheck && p.citationCheck.ok === false) citeBadge = '<span class="pill failed">Citation check found issues</span>';
+    else if (checkFailed) citeBadge = '<span class="pill needs-attention">Citation check found issues</span>';
+    else if (checkUnavailable) citeBadge = '<span class="pill needs-attention">Citation check unavailable</span>';
+
+    if (hasWarnings) {
+      var warnCard = el('<div class="card">' +
+        '<h2 style="margin-top:0">Completed — with warnings</h2>' +
+        '<p class="muted">' + (checkFailed
+          ? 'The report below is real and readable, but an independent, local structural check of its citations found a problem — for example a citation number with no matching source entry.'
+          : 'The report below is real and readable, but its citation structure could not be independently checked. This does not mean the citations passed or failed.') +
+        ' This is not an ordinary clean completion.</p>' +
+        (p.citationCheck && p.citationCheck.detail
+          ? '<div class="callout sim"><strong>Checker summary:</strong><br><span style="white-space:pre-wrap">' +
+            esc(p.citationCheck.detail) + '</span></div>'
+          : '') +
+        '<div id="repair-msg"></div>' +
+        '<div class="btn-row">' +
+        (checkFailed && p.sessionId ? '<button class="btn" id="repair-btn">Ask Claude to fix this</button>' : '') +
+        helpLinkHtml("reading-the-report", "What does this mean?") + '</div></div>');
+      right.appendChild(warnCard);
+      var repairBtn = warnCard.querySelector("#repair-btn");
+      if (repairBtn) {
+        repairBtn.addEventListener("click", function () {
+          repairBtn.disabled = true;
+          repairBtn.textContent = "Asking Claude to fix this…";
+          var msg = warnCard.querySelector("#repair-msg");
+          msg.innerHTML = "";
+          apiFetch("/api/projects/" + encodeURIComponent(p.id) + "/repair-citations", { method: "POST", body: {} })
+            .then(function () { loadAndRenderServerProject(p.id, document.getElementById("server-ws-slot")); })
+            .catch(function (e) {
+              repairBtn.disabled = false;
+              repairBtn.textContent = "Ask Claude to fix this";
+              msg.appendChild(el('<div class="msg error" role="alert">' + esc(e.message) + '</div>'));
+            });
+        });
+      }
+    }
+
     var card = el('<div class="card">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
       '<h2 style="margin:0">Report</h2>' + citeBadge + '</div>' +

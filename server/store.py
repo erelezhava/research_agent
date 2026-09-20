@@ -27,6 +27,7 @@ MAX_TASKS = 40
 MAX_TASK_LEN = 2000
 MAX_FILES = 50
 MAX_FILENAME_LEN = 300
+MAX_CLARIFICATION_LEN = 8000
 
 
 class ValidationError(ValueError):
@@ -54,6 +55,18 @@ def is_safe_id(pid):
     return isinstance(pid, str) and bool(SAFE_ID.fullmatch(pid))
 
 
+def validate_clarification(text):
+    """Clarification text the user types in the Needs attention screen. Must
+    be non-empty after trimming and within a sane size — the same discipline
+    as every other user-supplied text field in this module."""
+    if not isinstance(text, str) or not text.strip():
+        raise ValidationError("clarification text is required")
+    text = text.strip()
+    if len(text) > MAX_CLARIFICATION_LEN:
+        raise ValidationError(f"clarification text is too long (max {MAX_CLARIFICATION_LEN} characters)")
+    return text
+
+
 class Store:
     def __init__(self, root: Path):
         self.root = root                      # repository root (cwd Claude runs from)
@@ -75,6 +88,29 @@ class Store:
             return self.project_dir(pid).is_dir()
         except ValidationError:
             return False
+
+    # ---- safe removal ----
+    def remove(self, pid, confirm_title):
+        """Moves a project into projects/.trash/ rather than deleting it
+        outright, so an accidental removal is recoverable. Requires the
+        caller to have already re-typed the project's own title — checked
+        here too, server-side, never trusted from the client alone. Never
+        accepts an arbitrary filesystem path: `pid` goes through the same
+        project_dir() traversal boundary as every other project operation."""
+        pdir = self.project_dir(pid)
+        if not pdir.is_dir():
+            raise ValidationError("project not found")
+        meta = self.read_meta(pid)
+        if not meta:
+            raise ValidationError("project not found")
+        expected = (meta.get("title") or "").strip()
+        if not isinstance(confirm_title, str) or confirm_title.strip() != expected:
+            raise ValidationError("confirmation text does not match the project title")
+        trash_dir = self.projects_dir / ".trash"
+        trash_dir.mkdir(exist_ok=True)
+        dest = trash_dir / f"{pid}-{uuid.uuid4().hex[:8]}"
+        pdir.rename(dest)
+        return str(dest.name)
 
     # ---- creation ----
     def create(self, payload):

@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Launch the Deep Research local application.
+# Launch the Deep Research local application (bash/Linux/macOS path).
 # Starts the Python backend (server/app.py) bound to 127.0.0.1 only, waits
 # until it is confirmed up, then opens your browser. The backend serves the
 # UI and a narrow local API that can run real research through your own
 # local Claude Code CLI — see ui/README.md for exactly what that means and
 # what stays simulated.
+#
+# A cross-platform alternative that needs no bash — usable the same way on
+# Windows and macOS — is the root-level start.py: `python3 start.py`. Both
+# scripts launch the exact same backend the exact same way; use whichever
+# is more convenient on your system.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -6,12 +6,23 @@ stdlib-only Python structural checker. No autonomous scheduler or paid API fallb
 ## Two ways to use this
 
 **In a terminal**, open this project in Claude Code and run `/research <question>` directly (see
-below). **In a browser**, run `bash ui/launch.sh` for a friendlier interface that guides you
-through the question, an approach choice (Quick or Deep), and an editable brief, then launches the
-same `/research` workflow for you — see [ui/README.md](ui/README.md) for what that adds, exactly
-how it invokes Claude Code, and its security boundaries. Both paths write to the same kind of
-files and use the same evidence rules below; the browser one just adds a guided front end and,
-for projects it starts, its own `projects/<id>/` folder (see [Files](#files)).
+below). **In a browser**, run `python3 start.py` (or `bash ui/launch.sh` on Linux/macOS) for a
+friendlier interface that guides you through the question, an approach
+choice (Quick or Deep), and an editable brief, then launches the same research workflow for you —
+see [ui/README.md](ui/README.md) for what that adds, exactly how it invokes Claude Code, and its
+security boundaries. Both paths write to the same kind of files and use the same evidence rules
+below; the browser one just adds a guided front end and, for projects it starts, its own
+`projects/<id>/` folder (see [Files](#files)). The browser path also has no Bash tool available to
+the Claude session it launches (unlike a terminal `/research` session, which does) — see
+[ui/README.md](ui/README.md) for what that means for the citation checker.
+
+The browser and its backend stay on your computer, but a real research run sends your question and
+working context to Claude through your signed-in Claude Code CLI and fetches relevant web sources.
+The browser-started Claude process has no Bash tool or unrelated account connectors. Its file tools
+are still granted at the repository level by Claude Code, however: keeping writes inside the chosen
+`projects/<id>/` folder is enforced by the workflow instructions, not by an operating-system
+per-project sandbox. Treat this repository copy as the research app's trusted workspace. See the
+full [security explanation](ui/README.md#security-boundaries-this-backend-enforces).
 
 ## Start (terminal)
 Open this project in Claude Code and run:
@@ -60,8 +71,12 @@ time, one follow-up round, and a proportionately concise report (no exhaustive b
 comparing every individual product variant). These are prompt-level ceilings, not target spending
 or account quota guarantees. Exhausted budgets produce a checkpoint or qualified result, not an
 assertion of completeness; quick mode that turns out to need more says so and suggests deep mode
-rather than silently exceeding its own ceiling. Workers use Sonnet; the coordinator uses your
-session model. Changing coordinator model does not automatically change worker configuration.
+rather than silently exceeding its own ceiling. Workers use Sonnet. In a terminal `/research`
+session the coordinator uses whatever model your interactive session is running; in a
+browser-started project the coordinator model is a fixed, explicitly-configured value (Sonnet by
+default; see `ui/README.md` for how to change it) — it does **not** inherit "your session model",
+since there is no interactive session to inherit from. Changing coordinator model does not
+automatically change worker configuration.
 
 ## Evidence and validation
 CLAUDE.md defines schema version 2. Each task has a readable memo plus structured JSON with
@@ -78,6 +93,9 @@ structured records. It rejects missing records, malformed citations, duplicate I
 inconsistent completion markers. Unused sources are warnings. It does not detect every uncited
 claim or verify source truth, quotation accuracy, freshness, cache compatibility or sufficiency.
 Those remain coordinator/verifier responsibilities. Tests are synthetic and use no live models.
+In the browser, plain **Completed** means this checker ran and passed. A failed, missing, timed-out,
+or otherwise unavailable check produces **Completed with warnings**; a repair button is offered
+only when the checker actually found a structural citation problem.
 
 ## Existing records
 This repository ships with **no bundled research runs** — the `findings/`, `reports/`, `runs/`
@@ -97,9 +115,12 @@ predecessor, and never manufacture excerpts or missing metadata.
 - projects/<project_id>/: self-contained folder for each browser-started project (its own
   `runs/`, `findings/`, `reports/`, `sources/`, plus `project.json`, `state/` and `logs/`) — see
   [ui/README.md](ui/README.md). Not committed to this repo (see .gitignore); created on your
-  machine as you use the browser interface.
+  machine as you use the browser interface. Removed projects move to `projects/.trash/` rather
+  than being deleted (see [ui/README.md](ui/README.md)).
 - ui/: the browser interface and its local backend (server/) — optional, terminal use needs
   neither.
+- start.py: a stdlib-only, cross-platform launcher for the browser interface (alternative to
+  `ui/launch.sh`) — see [ui/README.md](ui/README.md).
 - scripts/check_citations.py: structural citation checker; takes an optional `--root` so it can
   validate either the top-level layout above or a `projects/<id>/` folder.
 

@@ -3,7 +3,7 @@
 A friendly front end for the research agent in this repository. It has two modes, chosen
 automatically by whether a local backend is running:
 
-- **Connected** (via `bash ui/launch.sh`): approved briefs create real projects on disk and
+- **Connected** (via `python3 start.py` or `bash ui/launch.sh`): approved briefs create real projects on disk and
   **Start research** launches the actual `/research` workflow through your own local Claude Code
   CLI. This is real research, not a simulation — it reads/writes files and can search the web,
   using your own Claude Code sign-in and allowance.
@@ -16,11 +16,18 @@ example/sample content stays clearly labeled as fictional in both modes.
 
 ## How to launch
 
-### Connected (recommended): `bash ui/launch.sh`
+### Connected: `bash ui/launch.sh` or `python3 start.py`
+
+Two equivalent launchers start the exact same backend the exact same way — use whichever is more
+convenient. `ui/launch.sh` is the original bash script; the repo root also has `start.py`, a
+stdlib-only Python launcher that needs no shell and is the easier path for people less comfortable
+with a terminal (see the root [README.md](../README.md)).
 
 ```bash
-bash ui/launch.sh
+python3 start.py
 ```
+
+On Linux/macOS, `bash ui/launch.sh` is an equivalent alternative.
 
 This starts the local backend (`server/app.py`) bound to **127.0.0.1 only**, waits until it's
 actually accepting connections, then opens your browser. Press `Ctrl+C` to stop. Pass a different
@@ -82,15 +89,30 @@ be guaranteed.
 claude -p "<instructions + mode + your approved prompt, verbatim>" \
   --model sonnet \
   --output-format stream-json --verbose \
-  --tools Read,Write,Edit,Bash,Grep,Glob,WebSearch,WebFetch,Task \
-  --disallowedTools "Bash(rm *)" "Bash(sudo *)" "Bash(chmod *)" "Bash(chown *)" \
-                     "Bash(dd *)" "Bash(mkfs*)" "Bash(shutdown*)" "Bash(reboot*)" "Bash(git push*)" \
+  --tools Read,Write,Edit,Grep,Glob,WebSearch,WebFetch,Task \
   --permission-mode acceptEdits \
   --permission-prompts none \
   --strict-mcp-config \
   --setting-sources project \
-  --session-id <generated-uuid>          # or --resume <uuid> for Resume
+  --session-id <generated-uuid>          # or --resume <uuid> for Resume/Clarify/Repair
 ```
+
+`--model` defaults to `sonnet` and can be overridden when the backend is launched (`--model` on
+`ui/launch.sh`'s underlying `python3 -m server.app` or on `start.py`); whatever value is actually
+configured is validated (`^[A-Za-z0-9_.:-]{1,80}$`) and exposed through `/api/health` so the browser
+can show the real value on the Ready-to-start screen — it is never a guess or a hardcoded label that
+could drift from what's actually running.
+
+**Bash is not in `--tools`.** An earlier version of this backend included Bash (so the session could
+run the citation checker itself) plus a `--disallowedTools "Bash(rm *)" ...` blacklist meant to keep
+it safe. That blacklist approach was removed: a denylist of dangerous subcommands is inherently
+incomplete, and unattended non-interactive sessions are exactly the case where a missed pattern has
+no human in the loop to catch it. Browser-started sessions now have **no Bash tool at all** — the
+citation checker instead runs as a separate, independent local Python process the backend starts
+itself after the session ends (see "What happens on…" below). Terminal `/research` sessions (where
+you're present and Bash is already available in your own Claude Code session) are unaffected and can
+still run the checker themselves — see `.claude/commands/research.md`, which now branches on whether
+Bash is available.
 
 Run from the repository root with `cwd` set there (not inside `projects/<id>/`), so
 `.claude/agents/`, `.claude/commands/research.md` and `CLAUDE.md` are auto-discovered exactly as
@@ -116,11 +138,10 @@ assumed — worth knowing since some of it is genuinely non-obvious:
   Write by default. `--permission-mode acceptEdits` is required for unattended file writes to work
   at all; `--permission-mode bypassPermissions` (equivalent to `--dangerously-skip-permissions`)
   is never used.
-- `--disallowedTools "Bash(rm *)"`-style patterns reliably deny specific subcommands even while
-  Bash itself stays available for the citation checker — verified: `rm` denied and logged,
-  `echo`/`Write` succeeded, in the same session.
 - `--session-id <uuid>` is honored verbatim, and `--resume <uuid>` reliably reconnects with full
-  memory — verified with a round-trip secret-word test across two separate invocations.
+  memory — verified with a round-trip secret-word test across two separate invocations. Resume is
+  now used for three separate flows: **Resume** after an interruption, **Continue research** after
+  answering a Needs-attention clarification, and the citation-repair follow-up (see below).
 
 ### Authentication and permissions
 
@@ -129,24 +150,41 @@ uses) — this app never asks for or stores an API key, and it never sets `ANTHR
 backend checks `claude auth status` before allowing Start; if you're not signed in, it says so
 plainly instead of trying anyway.
 
-The tool set above (Read/Write/Edit/Bash/Grep/Glob/WebSearch/WebFetch/Task) is the smallest set
-that still lets the actual workflow read/write its own project files, run
-`scripts/check_citations.py`, and delegate to `.claude/agents/`'s subagents — verified to be
-necessary and sufficient, not a guess. If a future CLI version can't reproduce this safely, the
-right response is the Needs attention state described below, not a weaker permission mode.
+The tool set above (Read/Write/Edit/Grep/Glob/WebSearch/WebFetch/Task, **no Bash**) is the smallest
+set that still lets the actual workflow read/write its own project files and delegate to
+`.claude/agents/`'s subagents — verified to be necessary and sufficient, not a guess. If a future CLI
+version can't reproduce this safely, the right response is the Needs attention state described
+below, not a weaker permission mode.
 
 ### What happens on…
 
 - **A clarifying question the model would normally ask you**: with nobody able to answer a
-  permission or input prompt, the run either proceeds (for things this configuration already
-  allows) or is cleanly denied (for anything it doesn't, e.g. `rm`) — nothing hangs waiting for a
-  human. If the coordinator genuinely needs your input before it can produce a report, it stops and
-  saves that in `run.md`; the project shows as **Needs attention**, and the workspace shows the
-  run's own saved notes so you can see what it's asking.
-- **A permission denial** (a disallowed pattern, or something outside the granted tools): recorded
-  and the run continues past it rather than crashing; if that denial prevents a report from being
-  written at all, the project ends up **Needs attention** or **Failed** depending on how the run
-  concluded.
+  permission or input prompt live, the run either proceeds (for things this configuration already
+  allows) or is cleanly denied (for anything outside the granted tools) — nothing hangs waiting for a
+  human mid-tool-call. If the coordinator genuinely needs your input before it can produce a report,
+  it stops and saves that in `run.md`; the project shows as **Needs attention**, and the workspace
+  shows the run's own saved notes **plus an in-browser "Add clarification" textarea and Continue
+  research button** — you answer directly in the browser rather than starting a new project. See
+  "Answering Needs-attention from the browser" below.
+- **A permission denial** (something outside the granted tools): recorded and the run continues past
+  it rather than crashing; if that denial prevents a report from being written at all, the project
+  ends up **Needs attention** or **Failed** depending on how the run concluded.
+- **A citation-check failure**: the backend's own independent `scripts/check_citations.py` process
+  (not the Claude session — it has no Bash) runs after the session ends. If it finds a structural
+  problem, the project shows **Completed with warnings** instead of plain **Completed** — the report
+  is still shown in full, with the checker's safe summary and a "Ask Claude to fix this" button that
+  resumes the same session to repair the citation structure and lets the backend rerun the checker.
+  See "Citation-check failures" below.
+- **A citation check that is missing, times out, or cannot start**: the report also shows
+  **Completed with warnings**, because it was not independently validated. It shows the safe reason
+  but no repair button, since the checker did not find a specific report defect.
+- **You click Stop** while a run is Starting or Researching: the backend sends the Claude process a
+  graceful termination signal (`SIGTERM` to its process group on POSIX; `CTRL_BREAK_EVENT` then
+  `taskkill /T /F` on Windows), waits a short grace period, and force-kills only if it hasn't exited.
+  The project is marked **Interrupted — resumable**, preserving its session id, so **Resume** works
+  afterward exactly like a usage-limit interruption. A narrow `/stop` endpoint checks the project id
+  against the actual active run before terminating anything, so a stale request or a different,
+  inactive project can never stop someone else's run.
 - **A usage-limit interruption**: detected from the CLI's own result text (patterns like "usage
   limit", "rate limit", "quota", "try again later") and shown as **Interrupted**, with a **Resume**
   button that reconnects the same session via `--resume` — explicitly restating the project's path
@@ -162,13 +200,66 @@ right response is the Needs attention state described below, not a weaker permis
 
 ### Browser workspace states
 
-**Ready to start · Starting… · Researching · Needs attention · Completed · Failed · Interrupted —
-resumable.** These come from the run's actual saved status (`projects/<id>/state/run.json`) and
-current files on disk — never a simulated countdown. While researching, the page polls the backend
-every ~2 seconds and shows the run's own saved notes (`run.md`, rendered) plus a short activity
-feed of generic tool-use labels ("Reading a project file", "Searching the web", …) — never the
-model's raw reasoning or full tool output. Only one research run can be active at a time in this
-prototype; starting a second project while one is running is refused with a clear message.
+**Ready to start · Starting… · Researching · Needs attention · Completed · Completed with warnings
+· Failed · Interrupted — resumable.** These come from the run's actual saved status
+(`projects/<id>/state/run.json`) and current files on disk — never a simulated countdown. While
+researching, the page polls the backend every ~2 seconds and shows the run's own saved notes
+(`run.md`, rendered) plus a short activity feed of generic tool-use labels ("Reading a project
+file", "Searching the web", …) — never the model's raw reasoning or full tool output. A **Stop**
+button is shown throughout Starting/Researching. Only one research run can be active at a time
+across the whole app; starting a second project while one is running is refused with a clear
+message, and removing or stopping a project other than the active one is likewise refused.
+
+### Stopping a run
+
+The Researching (and Starting) screen shows a **Stop** button. It posts to `/stop` with the
+project id; the backend verifies that id matches the currently active run (a stale click on a
+project that already finished, or one that was never active, does nothing) before terminating the
+Claude process and its process group. The project moves to **Interrupted — resumable** with its
+session id preserved, so **Resume** continues the exact same conversation afterward — stopping is
+not the same as abandoning the work done so far. On a graceful backend shutdown (`Ctrl+C` /
+`SIGTERM`), the server stops any active Claude process the same way before exiting, so a clean
+`Ctrl+C` never leaves an orphaned research process running in the background. A hard kill of the
+backend (`kill -9`, a crashed terminal, an OS crash) does **not** go through this cleanup path —
+whatever the operating system does with orphaned child processes in that case applies instead; this
+app cannot intervene once its own process has been killed without a chance to run its shutdown
+handler.
+
+### Answering Needs-attention from the browser
+
+When a project is **Needs attention**, the workspace shows an **Add clarification** textarea and a
+**Continue research** button (only when the project has a resumable session id — otherwise a clear
+fallback message explains there's nothing to resume and suggests starting a new project instead). A
+validated `POST /clarify` endpoint accepts only the clarification text for that specific project,
+rejects empty or oversized text (over 8000 characters) and unsafe project ids, and resumes the exact
+same Claude session with your text wrapped in an explicit
+`<<<USER_CLARIFICATION_BEGIN>>> ... <<<USER_CLARIFICATION_END>>>` delimiter that tells the model this
+is user-supplied research **data**, not new instructions. All of the project's existing files, runs,
+findings, and evidence are preserved — this resumes the same run, it does not start a new one.
+
+### Citation-check failures and repair
+
+Plain **Completed** is used only when the backend's independent citation checker runs and passes.
+If it finds a structural problem, the project shows **Completed with warnings**. The report itself
+is still shown in full, along with the checker's safe summary (never a raw stack trace or absolute
+path) and an **"Ask Claude to fix this"** button. That button calls `POST /repair-citations`, which
+resumes the same session with the checker's output wrapped in a
+`<<<CHECKER_OUTPUT_BEGIN>>> ... <<<CHECKER_OUTPUT_END>>>` data delimiter and asks it to repair the
+structural issue; the backend then reruns the checker and updates the status accordingly. If the
+checker is missing, times out, or cannot start, the same warning state is used but the repair button
+is withheld: validation was inconclusive and there is no identified report defect for Claude to
+repair.
+
+### Removing a project
+
+Each project's workspace has a **Remove** control, collapsed behind a confirmation step: you must
+type the project's exact title to enable the confirm button, and removal is refused outright while
+that project is the currently active run. `POST /remove` re-validates the project id through the
+same safe-id boundary used everywhere else (`^[a-z0-9][a-z0-9-]{0,62}$`, resolved and checked
+against the real `projects/` directory — no client-supplied filesystem path is ever accepted) and
+then **moves** the project's folder into a local, git-ignored `projects/.trash/` folder rather than
+deleting it, so an accidental removal is still recoverable by hand from disk. The confirmation UI
+notes that the project's logs may contain your original question, sources, and Claude's output.
 
 ### Project storage
 
@@ -199,6 +290,11 @@ tracked); nothing you create there is committed.
   metacharacters (`` ` ``, `$()`, `;`, quotes) is passed through as literal data and cannot execute
   anything. No endpoint accepts or runs arbitrary shell commands.
 - `--dangerously-skip-permissions` / `--permission-mode bypassPermissions` are **never** used.
+- The Claude process runs from the repository root so it can discover `CLAUDE.md`, commands, and
+  agent definitions. Its Read/Write/Edit permissions therefore cover the repository as a whole;
+  keeping research output inside `projects/<id>/` is enforced by the workflow instructions, not an
+  operating-system per-project sandbox. Use this repository copy as a trusted research workspace
+  and do not store unrelated sensitive files inside it.
 - Project ids are always server-generated and validated (`^[a-z0-9][a-z0-9-]{0,62}$`) before ever
   touching a path; traversal attempts (`../..`, encoded slashes, etc.) are rejected before any
   filesystem access.
@@ -239,22 +335,39 @@ before connected mode existed.
 - `research.html`, `styles.css`, `app.js`, `data.js` — the frontend (unchanged structure; `app.js`
   now includes an API client used only when connected).
 - `launch.sh` — starts the local backend, loopback-only, with friendly error handling.
-- `../server/app.py`, `store.py`, `runner.py` — the local backend: HTTP app, project storage, and
-  the verified Claude Code invocation (see Connected mode above).
-- `../tests/test_server.py`, `../tests/fixtures/fake_claude.py` — automated tests using a fake
-  `claude` executable; no real CLI or Claude allowance is used by the test suite.
+- `../start.py` — a stdlib-only, cross-platform alternative launcher at the repo root (see the root
+  [README.md](../README.md) and [USER_GUIDE.md](../USER_GUIDE.md)); starts the same backend the same
+  way and needs no shell script.
+- `../server/app.py`, `store.py`, `runner.py` — the local backend: HTTP app, project storage
+  (including safe removal-to-trash), and the verified Claude Code invocation and process lifecycle
+  (start/stop/resume/clarify/repair — see Connected mode above).
+- `../tests/test_server.py`, `../tests/test_start.py`, `../tests/fixtures/fake_claude.py` —
+  automated tests using a fake `claude` executable; no real CLI or Claude allowance is used by the
+  test suite.
 
 ## Verification
 
-**Automated** (`python3 -B -m unittest discover -s tests -v`, 36 tests, all against a fake `claude`
-— zero real Claude allowance consumed): mode (`quick`/`deep`) passed correctly; the approved prompt
+**Automated** (`python3 -B -m unittest discover -s tests -v`, all against a fake `claude` — zero
+real Claude allowance consumed): mode (`quick`/`deep`) passed correctly; the approved prompt
 preserved exactly, including special characters; shell metacharacters in a prompt proven inert (a
 marker file is asserted never created); unsafe project ids and path-traversal attempts rejected;
 only one run active at a time; successful completion exposes the report; a CLI failure produces a
 clear Failed state; a usage-limit-shaped interruption produces Interrupted, and Resume then
 completes it; state survives a full server restart; the server binds loopback-only; cross-origin
-POSTs are rejected; oversized request bodies are rejected; the legacy citation-checker tests still
-pass unchanged.
+POSTs are rejected; oversized request bodies are rejected; **Bash is confirmed absent from every
+`--tools` invocation and no disallowed/bypass permission flags are ever passed**; **Stop** correctly
+terminates a held run to Interrupted (with a real OS-level process kill, verified against a
+genuinely long-held fake process), Resume then completes it, a different/inactive project cannot
+stop the active run, and a graceful backend shutdown leaves no fake process running; the
+**clarification** flow succeeds, rejects invalid/empty/oversized text and unsafe project ids, and
+resumes the correct session; **citation-check** states are tested for passing, failing, unavailable,
+and timed-out checks, producing Completed vs. Completed-with-warnings correctly, and the repair flow
+resumes and re-checks; **model** validation accepts the default and valid overrides and rejects
+invalid values; project **removal** rejects traversal attempts and an active project, requires the
+matching confirmation title, and moves (never deletes) the folder into `projects/.trash/`; the root
+`start.py` launcher is tested separately (readiness wait, exactly-once browser open, invalid port
+rejected, `--model`/`--claude-bin` reaching the backend) without ever opening a real external
+browser. Run the suite yourself for the exact current test count.
 
 **Manual, with the fake runner** (no real Claude usage): the complete browser flow — new project →
 choose Deep → approve → Start research → live Researching status with an activity feed → Completed
@@ -279,12 +392,21 @@ real research run (by design — see above).
 - Only one research run can be active at a time, across the whole app (a deliberate v1 choice,
   stated in the interface).
 - Document selection still records names only in both modes — no file content is ever uploaded,
-  opened, or read; a secure file-import design is a future step.
+  opened, or read; the field says so before you select anything, and a secure file-import design is
+  a future step, not something this pass implements.
 - The activity feed shows generic tool-use labels, not full tool arguments or model reasoning, by
   design (see Security above) — read the rendered report or `run.md` for the substantive content.
 - The Markdown renderer covers what these reports use (headings, ordered/unordered lists with one
-  level of nesting, tables, blockquotes, bold, italic, links, citations); it's intentionally
-  minimal, not a full Markdown engine.
+  level of nesting, tables, blockquotes, bold, italic, links, citations, and same-page `#anchor`
+  links for in-app Help cross-references); it's intentionally minimal, not a full Markdown engine.
 - The backend is a small stdlib-only HTTP server (no framework), sized for one local user — it is
   not meant to serve multiple simultaneous users or survive adversarial network conditions beyond
   the loopback/Host/Origin protections described above.
+- Stop/shutdown process cleanup is verified for **graceful** termination (Stop button, `Ctrl+C`,
+  `SIGTERM`) on POSIX; the Windows code path (`CTRL_BREAK_EVENT`/`taskkill`) is implemented but not
+  yet run and observed on real Windows. A hard kill of the backend process itself (`kill -9`, a
+  crashed terminal, an OS crash) bypasses this cleanup entirely — whatever the OS does with orphaned
+  children in that case applies, not this app's graceful-shutdown guarantee.
+- `start.py` is verified on Linux; macOS and Windows are expected to work (same stdlib-only code
+  path) but have not actually been run and observed — see the root README and USER_GUIDE for the
+  same caveat on `ui/launch.sh`.

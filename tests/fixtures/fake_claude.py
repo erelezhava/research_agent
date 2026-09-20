@@ -6,17 +6,27 @@ server/runner.py's module docstring) to exercise server/runner.py and
 server/app.py end to end.
 
 Controlled entirely by environment variables set by the test:
-- FAKE_CLAUDE_SCENARIO: success | needs_attention | failure | usage_limit
+- FAKE_CLAUDE_SCENARIO: success | needs_attention | failure | usage_limit |
+  citation_fail | hang
 - FAKE_CLAUDE_ARGV_DUMP: if set, the full argv is JSON-dumped there (one
   element per line) so a test can assert exactly what was passed — e.g. that
   a prompt containing shell metacharacters arrived verbatim as data, that no
   --dangerously-skip-permissions / bypassPermissions flag is ever present,
-  that the disallowed-patterns and tools list are exactly what runner.py
-  claims to send.
+  that bare Bash is never in --tools, and that no unrelated MCP flag appears.
+- FAKE_CLAUDE_HOLD: seconds to sleep right after the init event — lets a
+  test reliably catch the fake "mid-run" (e.g. to exercise Stop, or the
+  single-active-run lock).
 - FAKE_CLAUDE_MARKER_DIR: if a prompt asks the fake to "run" a destructive
   command, a real shell would create a marker file here — the fake never
   does this (it doesn't execute anything), so the marker's absence is what
   the test checks to prove shell metacharacters had no effect.
+
+`hang` sleeps far longer than any test's own timeout, deliberately, so tests
+can exercise Stop / SIGTERM shutdown against a genuinely still-running
+process rather than racing a fake that might finish on its own first. It
+responds to SIGTERM like any ordinary process (Python's default handler
+raises SystemExit), so it also stands in for "a real Claude process that
+respects a graceful termination request."
 """
 import json
 import os
@@ -58,7 +68,7 @@ def main():
         sys.stdout.flush()
 
     emit({"type": "system", "subtype": "init", "session_id": session_id,
-          "tools": ["Task", "Bash", "Edit", "Glob", "Grep", "Read", "WebFetch", "WebSearch", "Write"],
+          "tools": ["Task", "Edit", "Glob", "Grep", "Read", "WebFetch", "WebSearch", "Write"],
           "mcp_servers": [], "permissionMode": "acceptEdits"})
 
     hold = float(os.environ.get("FAKE_CLAUDE_HOLD", "0") or 0)
@@ -73,6 +83,16 @@ def main():
         p = cwd / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text, encoding="utf-8")
+
+    if scenario == "hang":
+        # Deliberately outlives any reasonable test timeout; a test exercises
+        # Stop or backend-shutdown against this process while it's blocked
+        # here. Default SIGTERM handling (process exits) is exactly what a
+        # graceful-termination test wants to observe.
+        emit({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "WebSearch", "input": {"query": "long-running test query"}}]}})
+        time.sleep(3600)
+        return 0
 
     if scenario == "failure":
         emit({"type": "assistant", "message": {"content": [
@@ -101,6 +121,39 @@ def main():
         time.sleep(0.05)
         emit({"type": "result", "subtype": "success", "is_error": False,
               "result": "Stopped for clarification before writing a report.", "session_id": session_id})
+        return 0
+
+    if scenario == "citation_fail":
+        # Writes a report with a structurally broken citation (an orphan
+        # [2] with no matching Sources entry) so the backend's independent
+        # checker (server/runner.py's _run_citation_check) finds a real,
+        # reproducible failure rather than a simulated one.
+        if project_id:
+            write(f"projects/{project_id}/runs/{run_id}/run.md",
+                  "# Run: run-fake-1\n\n## Phase\nsynthesis -> complete\n\n"
+                  "## Stop reason\n**supported_within_scope**\n")
+            write(f"projects/{project_id}/findings/{run_id}/t1.md", "## Answer\nFake finding.\nstatus: complete\n")
+            bundle = {
+                "schema_version": 2, "run_id": run_id, "task_id": "t1", "scope_key": "v1",
+                "status": "complete",
+                "evidence": [{
+                    "evidence_id": "t1-e1", "stance": "supports", "title": "Fake source",
+                    "source": "https://example.invalid/fake", "locator": "p.1",
+                    "pub_date": "2026-01-01", "access_date": "2026-01-01", "period_or_version": "v1",
+                    "excerpt_type": "extraction", "excerpt": "Fake excerpt.", "claim": "Fake claim.",
+                    "qualifications": "none", "coverage": "partial", "provenance": "test fixture",
+                }],
+            }
+            write(f"projects/{project_id}/findings/{run_id}/t1.json", json.dumps(bundle))
+            write(f"projects/{project_id}/reports/{run_id}.md",
+                  "# Fake report with a broken citation\n\n"
+                  "A supported finding [1] and an orphan claim with no matching source [2].\n\n"
+                  "## Sources\n[1] t1-e1 — Fake source — https://example.invalid/fake — accessed 2026-01-01\n")
+        emit({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Write", "input": {"file_path": f"projects/{project_id}/reports/{run_id}.md"}}]}})
+        time.sleep(0.05)
+        emit({"type": "result", "subtype": "success", "is_error": False,
+              "result": "Report complete.", "session_id": session_id})
         return 0
 
     # default: success, with a real report + findings + valid citations so the
@@ -134,8 +187,6 @@ def main():
         {"type": "tool_use", "name": "Task", "input": {"subagent_type": "web-researcher"}}]}})
     emit({"type": "assistant", "message": {"content": [
         {"type": "tool_use", "name": "Write", "input": {"file_path": f"projects/{project_id}/reports/{run_id}.md"}}]}})
-    emit({"type": "assistant", "message": {"content": [
-        {"type": "tool_use", "name": "Bash", "input": {"command": "python3 scripts/check_citations.py " + run_id}}]}})
     time.sleep(0.05)
     emit({"type": "result", "subtype": "success", "is_error": False,
           "result": "Report complete.", "session_id": session_id})

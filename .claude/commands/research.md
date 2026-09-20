@@ -105,14 +105,22 @@ No prose after Sources. Each clause must map to the correct supporting record, n
 ID mentioned in a memo. Derived conclusions may cite inputs plus a clear argument in the report.
 
 ## 6. Verify and revise
-Run `python3 scripts/check_citations.py runs/<run_id>` from the project root. Fix errors;
-review warnings. This establishes structural links only, not truth or source support.
+If a Bash tool is available in this session, run
+`python3 scripts/check_citations.py runs/<run_id>` (or the rooted form given at the start of the
+conversation, if one was) from the project root; fix errors and review warnings. This establishes
+structural links only, not truth or source support. If no Bash tool is available in this session
+(as in a browser-launched run — the coordinator is told this explicitly at the start of such a
+conversation), do not attempt the command and do not report it as a failed step: write the report
+exactly to this section's format so the check can pass, and note in run.md that structural
+validation runs in a separate local process after this session ends, with its result shown to the
+user independently of this conversation.
 Give the verifier the report, evidence paths, method, material gaps and separate remaining budget.
 Save its response in verification.md with the report hash/revision and actual coverage.
 Every material flag must be corrected, removed, qualified or explicitly unresolved with its
 consequences for the conclusion. Recheck all changed claims and dependent conclusions regardless
-of flag count. Rerun structural validation after edits. If remaining budget cannot verify repairs,
-mark the report provisional and record unchecked items; never report a full clean verification.
+of flag count. Rerun structural validation after edits when Bash is available. If remaining budget
+cannot verify repairs, mark the report provisional and record unchecked items; never report a full
+clean verification.
 
 ## 7. Close or checkpoint
 Reconcile every task status and save next actions. Distinguish complete execution from sufficient

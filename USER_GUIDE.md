@@ -109,9 +109,27 @@ mean anything to you, use Option A instead — there's no downside.
 
 ## 4. Launching the application
 
-The one and only launch method that has been built and verified for this app is a single command
-run from a terminal — there is currently no double-click launcher. If you've never opened a
-terminal, that's completely fine; here's exactly how.
+There are two ways to launch, both starting the exact same local backend the exact same way — pick
+whichever is easier for you.
+
+### Option A: `python3 start.py` (no terminal scripting knowledge needed)
+
+From a terminal in the project folder (see Step 1 below for how to get one open), run:
+
+```bash
+python3 start.py
+```
+
+This is a small, plain Python script — no bash, no special shell features — so it works the same
+way on Linux, macOS, and Windows wherever Python 3 itself runs. It starts the backend, waits until
+it's actually ready, and opens your browser automatically, exactly like Option B below. (It was
+built and tested on Linux in this project's own development environment; macOS and Windows are
+expected to work because they run the identical Python code, but that hasn't actually been run and
+watched on those systems yet — this guide says so plainly rather than assuming.)
+
+### Option B: `bash ui/launch.sh` (the original script, still supported)
+
+If you've never opened a terminal, that's completely fine; here's exactly how.
 
 ### Step 1: Open a terminal in the project folder
 
@@ -158,8 +176,14 @@ yourself.
 
 ### Stopping the app
 
-Go back to the terminal window and press **Ctrl+C**. The app stops immediately; nothing keeps
-running in the background afterward.
+Go back to the terminal window and press **Ctrl+C**. This shuts down gracefully: if research was
+actively running, the app stops that process (and any processes it started) before exiting, so
+nothing keeps running in the background afterward — **for this normal, graceful shutdown path**. A
+hard kill of the terminal window, `kill -9`, or your computer crashing or losing power does **not**
+go through this cleanup, and may leave a process running until your operating system cleans it up on
+its own; that's outside what this app can guarantee once it hasn't been given the chance to shut
+down cleanly. If you need to stop a specific in-progress research run without closing the whole app,
+use the **Stop** button in that project's workspace instead (see [section 7](#7-following-progress)).
 
 ### Handling common startup problems
 
@@ -183,9 +207,10 @@ Once the app is open in your browser:
 1. Click **New research**.
 2. **Describe your question** in ordinary language, the way you'd ask a knowledgeable friend — a
    sentence or two is enough.
-3. Optionally **add documents** — you can attach files here, but see the important note in
-   [section 10](#10-project-files-and-privacy): only their *names* are recorded right now, not
-   their content.
+3. Optionally **list document names** — this field records the *names* of files you select, not
+   their content: nothing is read, opened, or uploaded. If a document's actual content matters,
+   describe the relevant details as text in your question instead (see
+   [section 10](#10-project-files-and-privacy)).
 4. Open **Advanced options** if you want to set a **timeframe** ("Latest available," "Within the
    last year," or "Any time — background is fine") or a rough depth hint. This step is optional.
 5. Click **Continue**, and answer any of the **follow-up questions** that are useful — every one of
@@ -233,13 +258,14 @@ these:
 
 | State | What it means | What to do |
 |---|---|---|
-| **Ready to start** | The brief is approved but research hasn't begun | Review the prompt, then click **Start research** when ready |
-| **Starting…** | The research process is being launched | Just wait a moment — this is brief |
-| **Researching** | Real research is actively running | Watch the activity list if you like, or leave and come back later |
-| **Needs attention** | It stopped before writing a report, usually because it needs something from you | Read its saved notes (see [section 8](#8-answering-questions-from-the-agent)) |
-| **Completed** | A report was written | Open the project to read it (see [section 9](#9-reading-the-report)) |
+| **Ready to start** | The brief is approved but research hasn't begun | Review the prompt and the model it will use, then click **Start research** when ready |
+| **Starting…** | The research process is being launched | Just wait a moment — this is brief. A **Stop** button is available if you change your mind. |
+| **Researching** | Real research is actively running | Watch the activity list if you like, or leave and come back later. A **Stop** button lets you pause it early (see [section 11](#11-pausing-resuming-and-failures)). |
+| **Needs attention** | It stopped before writing a report, usually because it needs something from you | Answer directly in the browser (see [section 8](#8-answering-questions-from-the-agent)) |
+| **Completed** | A report was written and passed its automatic citation check | Open the project to read it (see [section 9](#9-reading-the-report)) |
+| **Completed with warnings** | A report was written, but the automatic citation check either found a structural issue or could not complete | The report is still shown in full; read the warning note and see [section 11](#11-pausing-resuming-and-failures) |
 | **Failed** | It did not finish successfully | Read the error message; see [section 13](#13-troubleshooting) |
-| **Interrupted — resumable** | It stopped partway (often a usage limit, or the app/computer closing) | Click **Resume** to continue the same work |
+| **Interrupted — resumable** | It stopped partway (a usage limit, you clicking **Stop**, or the app/computer closing) | Click **Resume** to continue the same work |
 
 **What's real versus estimated:** the state shown always reflects what's actually saved on disk —
 there is no simulated progress bar or fake percentage anywhere in this flow. While *Researching*,
@@ -251,9 +277,11 @@ plain-language summary of activity, not a live transcript of everything the mode
 
 Sometimes the research can't responsibly continue without something only you know. When that
 happens, the project shows **Needs attention**, and opening it shows the run's own saved notes
-explaining what's missing. There's no separate chat box for this yet — you address it by starting
-a **new research project** with that detail included, or by adding it directly into your prompt
-before you first click Start research.
+explaining what's missing, along with an **Add clarification** text box and a **Continue research**
+button right there in the browser. Type the missing detail and click **Continue research** — this
+resumes the *same* research session with your answer, rather than starting over: everything already
+gathered stays in place. (If the project has no resumable session for some reason, the workspace
+shows a clear message instead and suggests starting a new project.)
 
 Practical examples of the kind of detail that helps:
 
@@ -312,27 +340,40 @@ In plain terms, it holds:
   internet** while researching — that's simply what "doing research" requires. Don't put anything
   in a research question that you wouldn't want processed by Claude or potentially requested from
   a website.
-- **Documents you select are not processed.** Only their file names are recorded right now — no
-  file content is uploaded, opened, or read by this app. If a research question depends on the
-  actual contents of a document, describe the relevant details in your question text instead for
-  now.
+- **Document names, not document content.** The document field only ever records the *names* of
+  files you select — no file content is uploaded, opened, or read by this app, and the interface
+  says so before you select anything. If a research question depends on the actual contents of a
+  document, describe the relevant details in your question text instead for now.
+- **File access during a run.** Browser-started Claude has no general command shell and no unrelated
+  account connectors. Claude Code grants its Read/Write/Edit file tools for this repository as a
+  whole, though. The workflow tells it to keep all research files inside the selected
+  `projects/<project-id>/` folder, but that folder boundary is an instruction rather than a separate
+  operating-system sandbox. Use this app from a repository copy you are comfortable treating as a
+  trusted research workspace; don't place unrelated sensitive files in it.
 - **Clearing your browser's storage** only removes drafts you were composing in **standalone**
   preview mode (see [section 14](#14-advanced-section)) — it has **no effect** on real projects,
-  which live as files in `projects/` regardless of what your browser does. Conversely, **deleting
-  a project's folder** removes that project for good — there is currently no in-app delete button
-  for real projects, so this is a manual step (see [section 12](#12-sharing-and-updating)).
+  which live as files in `projects/` regardless of what your browser does.
+- **Removing a project** is available directly in the app: open the project and use its **Remove**
+  control. It asks you to type the project's exact title to confirm (so it can't happen by
+  accident), refuses to remove a project that's currently running research, and moves the project's
+  folder into a local `projects/.trash/` folder rather than deleting it outright — so an accidental
+  removal is still recoverable by hand from disk if you need it back. Its logs may contain your
+  original question, sources, and Claude's output, so treat that trash folder with the same care as
+  the project itself.
 
 ## 11. Pausing, resuming, and failures
 
 | Situation | What happens | What to do |
 |---|---|---|
+| **You click Stop** on a Starting/Researching project | The research process is stopped safely (graceful shutdown first, force-stopped only if needed); the project moves to **Interrupted — resumable** with its progress preserved | Click **Resume** whenever you want to continue — it's the same conversation, not a restart |
 | **Claude usage allowance runs out mid-run** | The project moves to **Interrupted — resumable** | Click **Resume** once you have allowance again — it continues the same conversation rather than starting over |
-| **You close the app (Ctrl+C) or shut down your computer while research is running** | The project is corrected the next time you open it, from **Researching** to **Interrupted — resumable**, if a session was already recorded | Reopen the app later and click **Resume**; if no session was recorded yet, start a new project instead |
+| **You close the app (Ctrl+C) or shut down your computer while research is running** | A graceful `Ctrl+C` stops the active research process cleanly before the app exits, and the project is corrected the next time you open it, from **Researching** to **Interrupted — resumable**, if a session was already recorded. A hard kill or an OS crash skips this cleanup — see [section 4](#4-launching-the-application). | Reopen the app later and click **Resume**; if no session was recorded yet, start a new project instead |
 | **Your internet connection drops** | The research workflow will typically report this as a source it couldn't reach, not a hard crash, and continue with what it has | Read the report's limitations section for what wasn't checked |
-| **Claude needs a permission it wasn't already granted** | That specific action is safely declined and logged; a narrow, fixed set of actions is pre-approved for unattended research (reading/writing project files, running the report's citation check, and web search/fetch) | If this repeatedly blocks a real need, it will show up in the run's saved notes or the Failed state's message |
+| **Claude needs a permission it wasn't already granted** | That specific action is safely declined and logged; a narrow, fixed set of actions is pre-approved for unattended research (reading/writing project files, and web search/fetch — browser-started sessions have no general command-execution ability) | If this repeatedly blocks a real need, it will show up in the run's saved notes or the Failed state's message |
 | **A source can't be opened** | Recorded as a gap in that source's evidence, not treated as proof something is false | Read the limitations section; try providing the source directly in your question if you have it |
 | **Research stops with real uncertainty remaining** | This is normal and expected — the report says so plainly rather than guessing | Read the "limitations" section; consider re-running in Deep mode for more thorough checking |
-| **A report fails its automatic citation check** | The project still completes and the report is still shown, with a visible "Citation check found issues" note | Read the report a little more carefully around its citations; this flags a structural issue, not a guaranteed error |
+| **A report fails its automatic citation check** | The project shows **Completed with warnings** rather than plain Completed; the report is still shown in full, with the checker's safe summary and an **"Ask Claude to fix this"** button | Click "Ask Claude to fix this" to have the same session repair the structural issue and re-check, or read the report a little more carefully around its citations yourself — this flags a structural issue, not a guaranteed error |
+| **The automatic citation check cannot run or times out** | The project also shows **Completed with warnings**, because the report was not independently validated | Read the reason shown and inspect citations yourself; fix the local checker and resume or re-run if you need a validated result. No repair button appears because the checker did not identify a specific report defect |
 
 ## 12. Sharing and updating
 
@@ -360,6 +401,10 @@ update to the app's own code does not touch it. To update safely:
 - If you used `git clone` (Option B): `git pull` in the project folder. Since `projects/` isn't
   tracked by Git, pulling updates leaves it untouched automatically.
 
+To remove a project you no longer want, use its **Remove** control inside the app rather than
+deleting files by hand — see [section 10](#10-project-files-and-privacy). It moves the project to
+`projects/.trash/` instead of deleting it outright, so it stays recoverable.
+
 ### Backing up your projects
 
 To back up your research, simply **copy the entire `projects/` folder** somewhere safe (an
@@ -380,7 +425,9 @@ is needed to read or restore them later.
 | "Your Claude usage limit was reached during this run" | Your Claude account's allowance ran out | Wait for it to reset, then click **Resume** on that project |
 | No report appears on a Completed project | Rare — the run may not have written a report despite completing | Check the project's log file (see [section 14](#14-advanced-section)) for detail |
 | Clicking a citation number does nothing | The report may not have a matching Sources entry for that number | This indicates a structural issue in that particular report; the citation-check badge on the report will usually also flag it |
-| A document I selected doesn't seem to affect the research | This is expected right now — documents are not read, only their names are noted | Include the relevant details as text in your question instead, for now (see [section 10](#10-project-files-and-privacy)) |
+| A document I selected doesn't seem to affect the research | This is expected — documents are not read, only their names are noted | Include the relevant details as text in your question instead, for now (see [section 10](#10-project-files-and-privacy)) |
+| A project's report shows "Completed with warnings" | The automatic citation check found a structural issue, timed out, or could not run | Read the warning text. Use "Ask Claude to fix this" only when offered; otherwise restore the checker and validate again, or check the citations yourself |
+| I can't click Remove on a project | Removal is refused while that project is the currently active research run | Stop or wait for that run to finish first, then remove it |
 
 ## 14. Advanced section
 
@@ -391,6 +438,10 @@ This section is for people comfortable with a terminal; everything above works w
 ```bash
 bash ui/launch.sh          # default port 8765
 bash ui/launch.sh 9000     # use a different port
+
+python3 start.py           # cross-platform equivalent, default port 8765
+python3 start.py 9000      # a different port
+python3 start.py --model opus   # use a different coordinator model than the default (sonnet)
 ```
 
 You can also run the backend module directly for more control:
@@ -398,10 +449,13 @@ You can also run the backend module directly for more control:
 ```bash
 cd deep-research           # the project's root folder
 python3 -m server.app --host 127.0.0.1 --port 8765
+python3 -m server.app --host 127.0.0.1 --port 8765 --model opus
 ```
 
 `--host` only accepts loopback addresses (`127.0.0.1`, `localhost`, `::1`) — it refuses to bind
-anywhere else, by design.
+anywhere else, by design. The configured model (default `sonnet`, or whatever `--model` was actually
+given) is shown on the Ready-to-start screen before you spend any allowance, and is exposed by
+`/api/health` so the interface never guesses at what's actually running.
 
 ### Log locations
 
@@ -446,6 +500,9 @@ projects/<project-id>/
   reports/<run_id>.md    # the final report
   state/run.json         # current status, used by the app's interface
   logs/session-<id>.log  # full local technical log (see above)
+
+projects/.trash/<removed-project>/   # projects you removed via the in-app Remove control,
+                                      # moved here rather than deleted — see section 10
 ```
 
 ### How Quick and Deep are passed to the research workflow

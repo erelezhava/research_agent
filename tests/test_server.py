@@ -107,7 +107,7 @@ class ServerTestCase(unittest.TestCase):
         return data["project"]["id"]
 
     def wait_terminal(self, pid, timeout=10):
-        terminal = {"completed", "failed", "interrupted", "needs-attention"}
+        terminal = {"completed", "completed-with-warnings", "failed", "interrupted", "needs-attention"}
         deadline = time.time() + timeout
         last = None
         while time.time() < deadline:
@@ -393,6 +393,432 @@ class HealthTests(ServerTestCase):
             httpd.shutdown()
             t.join(timeout=5)
             httpd.server_close()
+
+
+class ToolPolicyTests(ServerTestCase):
+    """Verifies the exact argv the backend sends Claude — the actual
+    boundary enforced, not just what the code comments claim."""
+
+    def _argv_for(self, scenario="success"):
+        dumpfile = Path(self.tmp.name) / "argv-policy.json"
+        self.set_env("FAKE_CLAUDE_ARGV_DUMP", str(dumpfile))
+        self.set_env("FAKE_CLAUDE_SCENARIO", scenario)
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        self.wait_terminal(pid)
+        return json.loads(dumpfile.read_text()), pid
+
+    def test_bash_never_in_tools_argv(self):
+        argv, _ = self._argv_for()
+        tools_value = argv[argv.index("--tools") + 1]
+        tools = tools_value.split(",")
+        self.assertNotIn("Bash", tools, f"--tools was {tools_value!r}")
+
+    def test_no_bash_anywhere_in_argv(self):
+        argv, _ = self._argv_for()
+        self.assertNotIn("Bash", argv)
+        self.assertFalse(any("Bash(" in a for a in argv), "no Bash(...) pattern should remain")
+
+    def test_no_dangerous_permission_or_unrelated_mcp_flags(self):
+        argv, _ = self._argv_for()
+        joined = " ".join(argv)
+        self.assertNotIn("--dangerously-skip-permissions", argv)
+        self.assertNotIn("--allow-dangerously-skip-permissions", argv)
+        self.assertNotIn("bypassPermissions", joined)
+        self.assertNotIn("--mcp-config", argv)
+        self.assertIn("--strict-mcp-config", argv)
+
+    def test_expected_tools_present(self):
+        argv, _ = self._argv_for()
+        tools = argv[argv.index("--tools") + 1].split(",")
+        for expected in ("Read", "Write", "Edit", "Grep", "Glob", "WebSearch", "WebFetch", "Task"):
+            self.assertIn(expected, tools)
+
+
+class StopTests(ServerTestCase):
+    def test_stop_terminates_held_run_and_is_interrupted_resumable(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "hang")
+        pid = self.create_project()
+        status, _ = self.request("POST", f"/api/projects/{pid}/start")
+        self.assertEqual(status, 202)
+        # wait for it to actually be researching (past the init event)
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            _, data = self.request("GET", f"/api/projects/{pid}")
+            if data["project"]["status"] in ("starting", "researching"):
+                break
+            time.sleep(0.05)
+
+        status, data = self.request("POST", f"/api/projects/{pid}/stop")
+        self.assertEqual(status, 202, data)
+
+        final = self.wait_terminal(pid, timeout=10)
+        self.assertEqual(final["status"], "interrupted")
+        self.assertIsNotNone(final.get("sessionId"))
+        self.assertIn("stopped", (final.get("error") or "").lower())
+
+    def test_resume_after_stop_works(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "hang")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            _, data = self.request("GET", f"/api/projects/{pid}")
+            if data["project"]["status"] in ("starting", "researching"):
+                break
+            time.sleep(0.05)
+        self.request("POST", f"/api/projects/{pid}/stop")
+        self.wait_terminal(pid, timeout=10)
+
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        status, data = self.request("POST", f"/api/projects/{pid}/resume")
+        self.assertEqual(status, 202, data)
+        final = self.wait_terminal(pid, timeout=10)
+        self.assertEqual(final["status"], "completed")
+
+    def test_stop_rejected_when_project_not_active(self):
+        pid = self.create_project()  # never started
+        status, data = self.request("POST", f"/api/projects/{pid}/stop")
+        self.assertEqual(status, 409, data)
+
+    def test_different_project_cannot_stop_the_active_run(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "hang")
+        pid_a = self.create_project(question="A")
+        pid_b = self.create_project(question="B")
+        self.request("POST", f"/api/projects/{pid_a}/start")
+        time.sleep(0.3)
+
+        status, data = self.request("POST", f"/api/projects/{pid_b}/stop")
+        self.assertEqual(status, 409, data)
+
+        # A is still running/stoppable — proves B's failed attempt didn't
+        # touch A's process.
+        status, data = self.request("POST", f"/api/projects/{pid_a}/stop")
+        self.assertEqual(status, 202, data)
+        final = self.wait_terminal(pid_a, timeout=10)
+        self.assertEqual(final["status"], "interrupted")
+
+    def test_stale_pid_cannot_be_accidentally_killed(self):
+        """A project whose saved pid belongs to some unrelated (possibly
+        reused) process number, but which this Runner instance is not
+        actively tracking, must never be touched by stop()."""
+        pid = self.create_project()
+        # A real, currently-running process on this machine, guaranteed
+        # unrelated to any Claude run this Runner started.
+        marker = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            state_path = self.root / "projects" / pid / "state" / "run.json"
+            state = json.loads(state_path.read_text())
+            state.update(status="researching", pid=marker.pid, sessionId="stale")
+            state_path.write_text(json.dumps(state))
+
+            status, data = self.request("POST", f"/api/projects/{pid}/stop")
+            self.assertEqual(status, 409, data)  # not in this Runner's _active registry
+            self.assertIsNone(marker.poll(), "the unrelated process must still be running")
+        finally:
+            marker.terminate()
+            marker.wait(timeout=5)
+
+
+class GracefulShutdownTests(ServerTestCase):
+    def test_stop_all_terminates_active_child_process(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "hang")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        deadline = time.time() + 5
+        proc = None
+        while time.time() < deadline:
+            with self.httpd.app.runner._lock:
+                handle = self.httpd.app.runner._active.get(pid)
+            if handle is not None:
+                proc = handle.proc
+                break
+            time.sleep(0.05)
+        self.assertIsNotNone(proc, "run never registered as active")
+
+        self.httpd.app.runner.stop_all()
+        # stop_all terminates synchronously (waits up to the grace period),
+        # so the process must already be gone.
+        self.assertIsNotNone(proc.poll(), "child process must not survive stop_all()")
+
+        final = self.wait_terminal(pid, timeout=10)
+        self.assertEqual(final["status"], "interrupted")
+
+
+class ClarificationTests(ServerTestCase):
+    def _needs_attention_project(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "needs_attention")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        final = self.wait_terminal(pid)
+        self.assertEqual(final["status"], "needs-attention")
+        return pid
+
+    def test_clarify_success_resumes_and_completes(self):
+        pid = self._needs_attention_project()
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        status, data = self.request("POST", f"/api/projects/{pid}/clarify", {"text": "It's a VSC7552-V/5CC."})
+        self.assertEqual(status, 202, data)
+        final = self.wait_terminal(pid, timeout=10)
+        self.assertEqual(final["status"], "completed")
+
+    def test_clarify_uses_same_session_id(self):
+        pid = self._needs_attention_project()
+        before = self.request("GET", f"/api/projects/{pid}")[1]["project"]["sessionId"]
+        dumpfile = Path(self.tmp.name) / "argv-clarify.json"
+        self.set_env("FAKE_CLAUDE_ARGV_DUMP", str(dumpfile))
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        self.request("POST", f"/api/projects/{pid}/clarify", {"text": "Extra detail."})
+        self.wait_terminal(pid, timeout=10)
+        argv = json.loads(dumpfile.read_text())
+        self.assertIn("--resume", argv)
+        self.assertEqual(argv[argv.index("--resume") + 1], before)
+
+    def test_clarification_reaches_prompt_as_data(self):
+        pid = self._needs_attention_project()
+        dumpfile = Path(self.tmp.name) / "argv-clarify2.json"
+        self.set_env("FAKE_CLAUDE_ARGV_DUMP", str(dumpfile))
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        clarification = "The budget is 40 EUR and I already have a datasheet."
+        self.request("POST", f"/api/projects/{pid}/clarify", {"text": clarification})
+        self.wait_terminal(pid, timeout=10)
+        argv = json.loads(dumpfile.read_text())
+        prompt = argv[argv.index("-p") + 1]
+        self.assertIn(clarification, prompt)
+        self.assertIn("USER_CLARIFICATION_BEGIN", prompt)
+
+    def test_clarify_rejected_when_not_needs_attention(self):
+        pid = self.create_project()  # status: ready
+        status, data = self.request("POST", f"/api/projects/{pid}/clarify", {"text": "hello"})
+        self.assertEqual(status, 409, data)
+
+    def test_clarify_rejected_empty_text(self):
+        pid = self._needs_attention_project()
+        status, data = self.request("POST", f"/api/projects/{pid}/clarify", {"text": "   "})
+        self.assertEqual(status, 400, data)
+
+    def test_clarify_rejected_oversized_text(self):
+        pid = self._needs_attention_project()
+        big = "x" * (storemod.MAX_CLARIFICATION_LEN + 1)
+        status, data = self.request("POST", f"/api/projects/{pid}/clarify", {"text": big})
+        self.assertEqual(status, 400, data)
+
+    def test_clarify_rejected_unsafe_project_id(self):
+        status, data = self.request("POST", "/api/projects/../../etc/clarify", {"text": "hi"})
+        self.assertIn(status, (400, 404), data)
+
+
+class CitationCheckStateTests(ServerTestCase):
+    def test_citation_failure_produces_completed_with_warnings(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "citation_fail")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        final = self.wait_terminal(pid)
+        self.assertEqual(final["status"], "completed-with-warnings")
+        self.assertIsNotNone(final["reportMarkdown"])  # report still readable
+        self.assertIn("broken citation", final["reportMarkdown"])
+        self.assertFalse(final["citationCheck"]["ok"])
+        # a safe, local structural summary only — never a stack trace or path
+        self.assertNotIn("Traceback", final["citationCheck"]["detail"])
+
+    def test_citation_pass_produces_ordinary_completed(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        final = self.wait_terminal(pid)
+        self.assertEqual(final["status"], "completed")
+        self.assertTrue(final["citationCheck"]["ok"])
+
+    def test_citation_check_unavailable_is_visible_warning(self):
+        """A missing checker is inconclusive, but must not look verified."""
+        (self.root / "scripts" / "check_citations.py").unlink()
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        final = self.wait_terminal(pid)
+        self.assertEqual(final["status"], "completed-with-warnings")
+        self.assertIsNone(final["citationCheck"]["ok"])
+
+        # An unavailable check found no repairable structural issue, so the
+        # repair endpoint must not spend another model turn.
+        status, data = self.request("POST", f"/api/projects/{pid}/repair-citations")
+        self.assertEqual(status, 409, data)
+
+    def test_citation_check_timeout_is_visible_warning(self):
+        self.httpd.app.runner._run_citation_check = lambda project_id, run_id: {
+            "ok": None, "detail": "citation checker timed out"
+        }
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        final = self.wait_terminal(pid)
+        self.assertEqual(final["status"], "completed-with-warnings")
+        self.assertIsNone(final["citationCheck"]["ok"])
+        self.assertIn("timed out", final["citationCheck"]["detail"])
+
+    def test_citation_check_execution_failure_is_visible_warning(self):
+        self.httpd.app.runner._run_citation_check = lambda project_id, run_id: {
+            "ok": None, "detail": "could not run citation checker"
+        }
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        final = self.wait_terminal(pid)
+        self.assertEqual(final["status"], "completed-with-warnings")
+        self.assertIsNone(final["citationCheck"]["ok"])
+        self.assertIn("could not run", final["citationCheck"]["detail"])
+
+    def test_repair_citations_endpoint(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "citation_fail")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        final = self.wait_terminal(pid)
+        self.assertEqual(final["status"], "completed-with-warnings")
+
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")  # the "repair" resolves it
+        status, data = self.request("POST", f"/api/projects/{pid}/repair-citations")
+        self.assertEqual(status, 202, data)
+        final2 = self.wait_terminal(pid, timeout=10)
+        self.assertEqual(final2["status"], "completed")
+
+    def test_repair_rejected_when_no_warnings(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        self.wait_terminal(pid)
+        status, data = self.request("POST", f"/api/projects/{pid}/repair-citations")
+        self.assertEqual(status, 409, data)
+
+
+class ModelTests(ServerTestCase):
+    def test_default_model_is_sonnet(self):
+        status, data = self.request("GET", "/api/health")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["model"], "sonnet")
+
+    def test_model_appears_in_start_argv(self):
+        dumpfile = Path(self.tmp.name) / "argv-model.json"
+        self.set_env("FAKE_CLAUDE_ARGV_DUMP", str(dumpfile))
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        self.wait_terminal(pid)
+        argv = json.loads(dumpfile.read_text())
+        self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
+
+    def test_custom_model_is_exposed_in_health(self):
+        httpd = appmod.make_server(self.root, host="127.0.0.1", port=0,
+                                    claude_bin=str(FAKE_CLAUDE), model="opus")
+        port = httpd.server_address[1]
+        t = threading.Thread(target=httpd.serve_forever, daemon=True)
+        t.start()
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", "/api/health")
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+            conn.close()
+            self.assertEqual(data["model"], "opus")
+        finally:
+            httpd.shutdown()
+            t.join(timeout=5)
+            httpd.server_close()
+
+    def test_invalid_model_value_rejected(self):
+        with self.assertRaises(ValueError):
+            appmod.make_server(self.root, host="127.0.0.1", port=0,
+                                claude_bin=str(FAKE_CLAUDE), model="not a valid model; rm -rf /")
+
+
+class RemovalTests(ServerTestCase):
+    def test_remove_requires_confirmation_matching_title(self):
+        pid = self.create_project()
+        title = self.request("GET", f"/api/projects/{pid}")[1]["project"]["title"]
+        status, data = self.request("POST", f"/api/projects/{pid}/remove", {"confirmTitle": "wrong"})
+        self.assertEqual(status, 400, data)
+        self.assertTrue((self.root / "projects" / pid).is_dir())
+
+        status, data = self.request("POST", f"/api/projects/{pid}/remove", {"confirmTitle": title})
+        self.assertEqual(status, 200, data)
+        self.assertFalse((self.root / "projects" / pid).is_dir())
+
+    def test_remove_moves_to_trash_not_deletes_outright(self):
+        pid = self.create_project()
+        title = self.request("GET", f"/api/projects/{pid}")[1]["project"]["title"]
+        self.request("POST", f"/api/projects/{pid}/remove", {"confirmTitle": title})
+        trash = list((self.root / "projects" / ".trash").glob(f"{pid}-*"))
+        self.assertEqual(len(trash), 1)
+        self.assertTrue((trash[0] / "project.json").is_file())
+
+    def test_remove_rejected_while_active(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "hang")
+        pid = self.create_project()
+        title = self.request("GET", f"/api/projects/{pid}")[1]["project"]["title"]
+        self.request("POST", f"/api/projects/{pid}/start")
+        time.sleep(0.3)
+        status, data = self.request("POST", f"/api/projects/{pid}/remove", {"confirmTitle": title})
+        self.assertEqual(status, 409, data)
+        self.request("POST", f"/api/projects/{pid}/stop")
+        self.wait_terminal(pid, timeout=10)
+
+    def test_remove_rejected_path_traversal_id(self):
+        status, data = self.request("POST", "/api/projects/..%2f..%2fetc/remove", {"confirmTitle": "x"})
+        self.assertIn(status, (400, 404), data)
+
+    def test_remove_rejected_nonexistent_project(self):
+        status, data = self.request("POST", "/api/projects/does-not-exist-20260101-000000-abcdef/remove",
+                                     {"confirmTitle": "x"})
+        self.assertEqual(status, 404, data)
+
+    def test_remove_and_start_are_atomic(self):
+        """Once removal owns Runner's lock, Start cannot enter between the
+        active check and the directory rename."""
+        pid = self.create_project()
+        title = self.request("GET", f"/api/projects/{pid}")[1]["project"]["title"]
+        runner = self.httpd.app.runner
+        store = self.httpd.app.store
+        original_remove = store.remove
+        remove_entered = threading.Event()
+        allow_remove = threading.Event()
+        outcomes = {}
+
+        def blocking_remove(project_id, confirm_title):
+            remove_entered.set()
+            if not allow_remove.wait(5):
+                raise AssertionError("test did not release blocked removal")
+            return original_remove(project_id, confirm_title)
+
+        store.remove = blocking_remove
+        self.addCleanup(setattr, store, "remove", original_remove)
+
+        def do_remove():
+            try:
+                outcomes["remove"] = runner.remove_project(pid, title)
+            except Exception as exc:  # noqa: BLE001 - captured for assertion
+                outcomes["remove_error"] = exc
+
+        def do_start():
+            try:
+                outcomes["start"] = runner.start(pid)
+            except Exception as exc:  # noqa: BLE001 - expected after removal wins
+                outcomes["start_error"] = exc
+
+        remove_thread = threading.Thread(target=do_remove)
+        start_thread = threading.Thread(target=do_start)
+        remove_thread.start()
+        self.assertTrue(remove_entered.wait(5), "removal never reached the protected rename")
+        start_thread.start()
+        time.sleep(0.1)
+        self.assertTrue(start_thread.is_alive(), "Start entered while removal held Runner's lock")
+        allow_remove.set()
+        remove_thread.join(timeout=5)
+        start_thread.join(timeout=5)
+
+        self.assertNotIn("remove_error", outcomes)
+        self.assertIn("start_error", outcomes)
+        self.assertIsInstance(outcomes["start_error"], runnermod.RunnerError)
+        self.assertFalse((self.root / "projects" / pid).exists())
+        self.assertEqual(len(list((self.root / "projects" / ".trash").glob(f"{pid}-*"))), 1)
 
 
 class LegacyCheckerStillWorksTests(unittest.TestCase):
