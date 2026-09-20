@@ -27,13 +27,15 @@ these without an explicit scope/budget decision, same rule as deep mode below):
   follow-up round.
 - Report proportionately: focus on the decision at hand. No exhaustive background, no unnecessary
   subtopics, and do not compare every individual product variant — compare at the level that
-  actually distinguishes the options (e.g. families/tiers, not every SKU). Material claims still
-  require citations, and structural citation validation (section 6) still runs unconditionally.
+  actually distinguishes the options (e.g. families/tiers, not every SKU). Follow the public-report
+  boundary in CLAUDE.md and section 5 below. Material claims still require citations, and
+  structural citation validation (section 6) still runs unconditionally.
 - If the question cannot be answered responsibly within these limits — the topic turns out to
   need broader evidence, more contradiction-checking, or more sources than the ceiling allows —
-  **stop and say so plainly**, with a concrete recommendation to re-run in `mode: deep`. Do not
-  silently keep working past the ceiling as though it were deep mode; a checkpointed, honest
-  partial answer is correct behavior here, not a failure.
+  **stop and say so plainly in run.md and the final chat response**, with a concrete recommendation
+  to re-run in `mode: deep`. The report may state the resulting substantive uncertainty, but must
+  not narrate the mode or budget. Do not silently keep working past the ceiling as though it were
+  deep mode; a checkpointed, honest partial answer is correct behavior here, not a failure.
 
 **Deep mode** ceilings: the defaults already described in section 2 below (20/12/two workers/two
 follow-up rounds) — this is the original, unchanged rigorous workflow: full evidence records,
@@ -98,14 +100,47 @@ Follow-up is bounded by remaining budget and two rounds, not mandatory. Preserve
 uncertainty explicitly; unsupported negative search results do not prove absence.
 
 ## 5. Synthesize
-Write a proportionate answer with evidence and explicit reasoning. Label interpretation and
-assumptions where material. Preserve qualifications in the opening answer. Include significant
-alternatives, gaps, coverage limits, method and stop reason when useful; do not force filler.
-Use numeric [n] citations for source-backed claims; internal evidence IDs are run-unique.
-Use exactly one final `## Sources` section, each entry on one line:
+Keep research-process material in run.md, task memos and verification.md. The report is a
+self-contained academic or professional publication, not a trace of the work that produced it.
+
+After the evidence assessment, delegate the initial report draft to `report-writer`. Provide the
+exact question, intended audience when known, scope, report path, relevant memo/JSON paths,
+important assumptions, and the conclusions and qualifications the evidence supports. Do not ask
+the writer to research or to infer missing evidence. The coordinator owns the final report,
+reviews the draft against the evidence, and corrects it before verification. If delegation is
+unavailable, apply the report-writer contract directly.
+
+Choose headings that fit the topic rather than mechanically exposing the workflow. A substantial
+technical report will commonly use: title; abstract or executive summary; problem definition and
+scope; necessary background or assumptions; analysis organized by the reader's questions;
+recommendations or results; subject-matter limitations; and conclusion. Omit sections that add no
+value. Comparisons should use consistent dimensions. Procedures and checklists should be included
+only when they are deliverables the reader can use, not as a duplicate of the prose.
+
+The report must not contain research-agent narration or operational metadata. In particular, do
+not include sections or prose such as "how to read this report," "opening answer," "method and
+coverage note," search/read coverage, sources attempted, agent actions, tool/call counts, task
+status, checkpoint history, evidence IDs in prose, verification coverage, "contradictions found,"
+stop reason, resume instructions, or internal paths. Do not describe sourcing activity with phrases
+such as "this research found," "we searched," or "the agent verified" when the factual conclusion
+can be stated directly. Describe a scientific, engineering or analytical method only when it
+directly answers the user's topic; never confuse that with the method used to gather sources.
+
+Write in precise, neutral prose. Lead with the answer and decision-relevant findings, define terms
+once, remove repetition, and connect evidence to conclusions explicitly. Label assumptions and
+interpretations only where material. Integrate significant alternatives, disagreements and
+uncertainty into the relevant topical section. A limitation section may discuss constraints on
+the result or missing information that could change it, but must not become a search diary.
+
+Use numeric [n] citations for source-backed claims; internal evidence IDs are run-unique and appear
+only in the Sources entries. Use exactly one final `## Sources` section, each entry on one line:
 [n] <evidence_id> — <title> — <URL or local path> — accessed <date>
 No prose after Sources. Each clause must map to the correct supporting record, not merely an
 ID mentioned in a memo. Derived conclusions may cite inputs plus a clear argument in the report.
+
+Before verification, review the report once specifically for publication quality: remove workflow
+residue, duplicated summaries, meta-commentary, unsupported certainty and headings that describe
+the research process rather than the subject.
 
 ## 6. Verify and revise
 If a Bash tool is available in this session, run
@@ -121,7 +156,8 @@ Give the verifier the report, evidence paths, method, material gaps and separate
 Save its response in verification.md with the report hash/revision and actual coverage.
 Every material flag must be corrected, removed, qualified or explicitly unresolved with its
 consequences for the conclusion. Recheck all changed claims and dependent conclusions regardless
-of flag count. Rerun structural validation after edits when Bash is available. If remaining budget
+of flag count. Also correct any workflow residue or reader-facing quality defect the verifier
+identifies. Rerun structural validation after edits when Bash is available. If remaining budget
 cannot verify repairs, mark the report provisional and record unchecked items; never report a full
 clean verification.
 
@@ -130,7 +166,8 @@ Reconcile every task status and save next actions. Distinguish complete executio
 evidence. Record one stop reason: supported_within_scope, diminishing_returns,
 important_uncertainty, inaccessible_evidence, budget_exhausted, or needs_clarification.
 Report the path, concise answer and limitations, verification coverage, stop reason and resume
-command. Label self-reported counts as such; unavailable token/quota data is unavailable, not zero.
+command in the coordinator's final chat response and run.md, not in the report. Label self-reported
+counts as such; unavailable token/quota data is unavailable, not zero.
 
 Usage exhaustion may prevent a final save. Checkpoint throughout; never rely on a last message.
 After context compaction reload run.md and relevant evidence, not the entire transcript.

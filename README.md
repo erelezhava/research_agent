@@ -1,6 +1,6 @@
 # Adaptive deep research for Claude Code
 
-One coordinator, two retrieval worker roles and a verifier. Markdown instructions plus a
+One coordinator, two retrieval worker roles, a dedicated report writer and a verifier. Markdown instructions plus a
 stdlib-only Python structural checker. No autonomous scheduler or paid API fallback.
 
 ## Two ways to use this
@@ -37,7 +37,8 @@ Supply scope, timeframe and desired depth when useful. The coordinator saves the
 Add `mode: quick |` or `mode: deep |` before the question to pick a ceiling explicitly (e.g.
 `/research mode: quick | <question>`); with no prefix, the default is deep — the original,
 unprefixed behavior, unchanged. Quick mode is deliberately lighter (see Method and budget below)
-and will say so plainly and suggest deep mode rather than silently exceeding its own ceilings.
+and, when insufficient, the coordinator will say so outside the public report and suggest deep
+mode rather than silently exceeding its own ceilings.
 Sources may be plain text, CSV, JSON or PDF. This worker configuration has no Office conversion
 capability; convert DOCX/XLSX/PPTX into an appropriate readable format while preserving locators.
 Do not interpret unsupported or partial extraction as absence of evidence.
@@ -87,7 +88,8 @@ time, one follow-up round, and a proportionately concise report (no exhaustive b
 comparing every individual product variant). These are prompt-level ceilings, not target spending
 or account quota guarantees. Exhausted budgets produce a checkpoint or qualified result, not an
 assertion of completeness; quick mode that turns out to need more says so and suggests deep mode
-rather than silently exceeding its own ceiling. Workers use Sonnet. In a terminal `/research`
+rather than silently exceeding its own ceiling. Operational details stay in `run.md` and the final
+status message, not the reader-facing report. Workers use Sonnet. In a terminal `/research`
 session the coordinator uses whatever model your interactive session is running; in a
 browser-started project the coordinator model is a fixed, explicitly-configured value (Sonnet by
 default; see `ui/README.md` for how to change it) — it does **not** inherit "your session model",
@@ -98,7 +100,8 @@ The browser's explicit **Continue research** action is a new budget decision: ea
 one extra bounded pass (Quick: up to 3 collection calls and 2 verification checks; Deep: up to 8
 and 5) and records the extension in `run.md`. A project can use at most two continuation passes.
 After that it becomes **Completed — known limitations** instead of offering an endless loop. The
-remaining gaps stay visible in the report, and another project can be started if a different scope
+report preserves only substantive uncertainty that affects its conclusions; budget and continuation
+details remain in project status and `run.md`. Another project can be started if a different scope
 or new source material warrants more work.
 
 ## Evidence and validation
@@ -136,12 +139,13 @@ predecessor, and never manufacture excerpts or missing metadata.
 
 ## Files
 - .claude/commands/research.md: coordinator workflow, mode selection, checkpoints and resume.
-- .claude/agents/: retrieval and verification instructions.
+- .claude/agents/: retrieval, report-writing and verification instructions.
 - CLAUDE.md: shared rules, paths, memo and JSON contract.
 - runs/<run_id>/run.md: scope, methods, task status, inputs, gaps and next actions.
 - runs/<run_id>/verification.md: versioned audit coverage and issue dispositions.
 - findings/<run_id>/<task_id>.md and .json: task findings and evidence.
-- reports/<run_id>.md: report; sources/: user inputs.
+- reports/<run_id>.md: polished reader-facing report; sources/: user inputs. Research logs and
+  operational metadata remain in runs/ and findings/, not in the report.
 - projects/<descriptive-title>-<timestamp>-<suffix>/: self-contained folder for each
   browser-started project (its own
   `runs/`, `findings/`, `reports/`, `sources/`, plus `project.json`, `state/` and `logs/`) — see

@@ -16,6 +16,10 @@ Also assess whether the conclusion follows: selective evidence, missing credible
 false balance, incompatible comparisons, unsupported absence claims and hidden uncertainty.
 Use targeted discovery for material doubts within budget. No universal source ranking.
 Derived results require inspectable premises/method; numerical checks do not prove a theorem.
+Check the report as a reader-facing publication as well as an evidence artifact. Flag research
+process narration, agent/tool/search logs, operational metadata, duplicated summaries and audit-log
+sections that should instead be integrated into the topical analysis. Do not confuse a legitimate
+subject-matter method or reproducible derivation with source-gathering narration.
 Report each issue as: claim/location | evidence | verdict | material/minor | explanation |
 needed correction/check. Also report checked claims, unchecked claims and coverage limitations.
 Do not produce a global clean verdict from partial checking. All material flags require a

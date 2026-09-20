@@ -247,9 +247,9 @@ those genuinely can't be guaranteed in advance.
   I'm actually building."* — a technical decision with real engineering consequences. **Deep
   research** is the right fit.
 
-If Quick research turns out to be too limited for what you asked, the report will say so plainly
-and suggest re-running the same question in Deep mode — it will not silently stretch past its own
-limits and pretend to be a full deep report.
+If Quick research turns out to be too limited for what you asked, the project status will say so
+plainly and suggest re-running the same question in Deep mode. The public report will state only
+the substantive uncertainty that affects the answer, not the internal mode or budget history.
 
 ## 7. Following progress
 
@@ -304,10 +304,13 @@ right documents instead of guessing at your context.
 
 A finished report is a normal, readable document with:
 
-- A **summary and recommendation** near the top.
+- A concise **abstract or executive summary** and the decision-relevant conclusion near the top.
 - **Confirmed facts** written plainly, with **inference or interpretation** labeled as such rather
   than blended in as if equally certain.
-- A **limitations** section describing what wasn't checked or couldn't be found.
+- Analysis organized around the **subject itself**, without search notes, agent activity, budgets,
+  verification logs, stop reasons, file paths, or other behind-the-scenes process details.
+- A **limitations** section when constraints or unresolved subject-matter uncertainty could change
+  the conclusion.
 - **Tables** comparing options side by side, where that's the clearest format.
 - **Numbered citations** like `[3]` next to specific claims.
 
