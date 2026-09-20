@@ -74,7 +74,10 @@ pool. These are ceilings, not targets or rate-limit guarantees. Adjust initial s
 user's request and record it, but never adjust quick mode's ceilings up to deep mode's without an
 explicit scope/budget decision — quietly exceeding quick's ceilings is exactly the silent-upgrade
 this workflow must not do. Do not silently exceed the applicable ceiling; checkpoint with
-budget_exhausted or seek a scope/budget decision when essential work remains. Local state
+budget_exhausted or seek a scope/budget decision when essential work remains. Do not use
+budget_exhausted solely because more sources or minor checks are always possible: use
+diminishing_returns when the remaining gaps are documented and more bounded research is unlikely
+to materially change the practical conclusion. Local state
 reads/writes and deterministic checks are recorded separately. No minimum searches.
 
 ## 3. Gather and checkpoint

@@ -107,7 +107,7 @@ class ServerTestCase(unittest.TestCase):
         return data["project"]["id"]
 
     def wait_terminal(self, pid, timeout=10):
-        terminal = {"completed", "completed-with-warnings", "failed", "interrupted", "needs-attention"}
+        terminal = {"completed", "completed-with-warnings", "completed-known-limitations", "failed", "interrupted", "needs-attention"}
         deadline = time.time() + timeout
         last = None
         while time.time() < deadline:
@@ -332,6 +332,51 @@ class OutcomeTests(ServerTestCase):
         pid = self.create_project()
         status, data = self.request("POST", f"/api/projects/{pid}/continue-budget")
         self.assertEqual(status, 409, data)
+
+    def test_two_budget_continuations_end_with_known_limitations_and_cannot_loop(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "budget_exhausted")
+        pid = self.create_project(approach="deep")
+        self.request("POST", f"/api/projects/{pid}/start")
+        self.assertEqual(self.wait_terminal(pid)["status"], "completed-with-warnings")
+
+        self.request("POST", f"/api/projects/{pid}/continue-budget")
+        first = self.wait_terminal(pid)
+        self.assertEqual(first["status"], "completed-with-warnings")
+        self.assertEqual(first["budgetContinuations"], 1)
+
+        self.request("POST", f"/api/projects/{pid}/continue-budget")
+        second = self.wait_terminal(pid)
+        self.assertEqual(second["status"], "completed-known-limitations")
+        self.assertEqual(second["budgetContinuations"], 2)
+
+        status, data = self.request("POST", f"/api/projects/{pid}/continue-budget")
+        self.assertEqual(status, 409, data)
+        self.assertIn("two continuation passes", data["error"])
+
+    def test_reconcile_old_run_infers_two_extensions_and_ends_loop(self):
+        pid = self.create_project()
+        pdir = self.root / "projects" / pid
+        run_id = "old-run"
+        (pdir / "runs" / run_id).mkdir(parents=True)
+        (pdir / "runs" / run_id / "run.md").write_text(
+            "# Run\n\n## Stop reason\n**supported_within_scope**\n\n"
+            "## Budget extension (explicit)\n\n"
+            "## Budget extension #2 (explicit)\n\n"
+            "**Final stop reason: `budget_exhausted`**\n",
+            encoding="utf-8")
+        state = self.httpd.app.store.read_run_state(pid)
+        state.update({
+            "status": "completed-with-warnings", "runId": run_id,
+            "stopReason": "budget_exhausted", "sessionId": "session-old",
+            "citationCheck": {"ok": True, "detail": "OK"},
+        })
+        self.httpd.app.store.write_run_state(pid, state)
+
+        status, data = self.request("GET", f"/api/projects/{pid}")
+        self.assertEqual(status, 200, data)
+        project = data["project"]
+        self.assertEqual(project["status"], "completed-known-limitations")
+        self.assertEqual(project["budgetContinuations"], 2)
 
 
 class RestartRecoveryTests(ServerTestCase):

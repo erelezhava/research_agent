@@ -180,6 +180,8 @@ class Store:
             "error": None,
             "pid": None,
             "runId": None,
+            "budgetContinuations": 0,
+            "maxBudgetContinuations": 2,
         })
         return meta
 
@@ -195,7 +197,8 @@ class Store:
         p = pdir / "state" / "run.json"
         if not p.is_file():
             return {"status": "ready", "phase": None, "sessionId": None, "mode": None,
-                     "stopReason": None, "error": None, "pid": None, "runId": None}
+                     "stopReason": None, "error": None, "pid": None, "runId": None,
+                     "budgetContinuations": 0, "maxBudgetContinuations": 2}
         return json.loads(p.read_text(encoding="utf-8"))
 
     def write_run_state(self, pid, state):
@@ -285,6 +288,8 @@ def _summarize(meta, state):
         "error": state.get("error"),
         "sessionId": state.get("sessionId"),
         "citationCheck": state.get("citationCheck"),
+        "budgetContinuations": state.get("budgetContinuations", 0),
+        "maxBudgetContinuations": state.get("maxBudgetContinuations", 2),
     }
 
 

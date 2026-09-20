@@ -93,6 +93,11 @@ FRIENDLY_TOOL_LABEL = {
 MAX_ACTIVITY = 80
 MAX_CLARIFICATION_LEN = 8000
 STOP_GRACE_SECONDS = 5.0
+# A bounded continuation is useful once or twice, but research always has one
+# more possible source to inspect.  Without a ceiling, an honest coordinator
+# can keep returning budget_exhausted forever.  Two passes are enough to
+# revisit the most material gaps while keeping the action predictable.
+MAX_BUDGET_CONTINUATIONS = 2
 
 
 class RunnerError(RuntimeError):
@@ -212,7 +217,7 @@ def build_resume_message(project_id):
     )
 
 
-def build_budget_continuation_message(project_id, mode):
+def build_budget_continuation_message(project_id, mode, continuation_number=1):
     """Continue a run only after the user explicitly accepts more research.
 
     The normal workflow correctly stops at its saved budget ceiling.  A click
@@ -225,6 +230,21 @@ def build_budget_continuation_message(project_id, mode):
         extra_collection, extra_verification, extra_workers = 3, 2, 1
     else:
         extra_collection, extra_verification, extra_workers = 8, 5, 2
+    final_extension = continuation_number >= MAX_BUDGET_CONTINUATIONS
+    finishing_rule = (
+        "This is the final browser-authorized budget extension. After this pass, do not use "
+        "budget_exhausted merely because more sources or minor checks are possible. Use "
+        "supported_within_scope when the answer is adequately supported. Use "
+        "diminishing_returns when remaining gaps are disclosed and another bounded pass is "
+        "unlikely to materially change the practical conclusions. Use important_uncertainty "
+        "only when the remaining uncertainty could materially change the answer."
+        if final_extension else
+        "At the end of this pass, use supported_within_scope when the answer is adequately "
+        "supported, or diminishing_returns when remaining gaps are disclosed and further "
+        "bounded research is unlikely to materially change the practical conclusions. Use "
+        "budget_exhausted only when a concrete unfinished check is likely to materially change "
+        "the answer; do not use it merely because more sources could always be consulted."
+    )
     return (
         f"Resume this run. As at the start of this conversation, \"{root_note}\" is the "
         f"effective project root: reload run.md from {root_note}/runs/<run_id>/run.md and the "
@@ -238,8 +258,7 @@ def build_budget_continuation_message(project_id, mode):
         f"{extra_verification} verification source checks to the previously recorded ceiling, "
         f"with at most {extra_workers} worker{'s' if extra_workers != 1 else ''} active at once "
         "and one additional follow-up round. Record this explicit extension and its actual usage "
-        "in run.md. Stop again with budget_exhausted if material work still remains after this "
-        "pass; do not silently exceed this extension. This session has no Bash tool; a separate "
+        f"in run.md. {finishing_rule} Do not silently exceed this extension. This session has no Bash tool; a separate "
         "local process runs the citation checker automatically after this session ends."
     )
 
@@ -412,18 +431,43 @@ class Runner:
         # recorded that evidence access was blocked. This reconciliation
         # preserves the research content and updates only its saved status so
         # the project tells the same truth as the run itself.
-        if state.get("status") in ("completed", "completed-with-warnings"):
+        if state.get("status") in ("completed", "completed-with-warnings", "completed-known-limitations"):
             run_id = state.get("runId") or _discover_run_id(self.store.project_dir(project_id))
             reason = _extract_stop_reason(self.store.project_dir(project_id), run_id)
+            inferred_continuations = _budget_continuation_count(
+                self.store.project_dir(project_id), run_id)
+            saved_continuations = state.get("budgetContinuations", 0)
+            if not isinstance(saved_continuations, int) or saved_continuations < 0:
+                saved_continuations = 0
+            continuations = max(saved_continuations, inferred_continuations)
+            changed = False
+            if state.get("budgetContinuations") != continuations:
+                state["budgetContinuations"] = continuations
+                changed = True
+            if state.get("maxBudgetContinuations") != MAX_BUDGET_CONTINUATIONS:
+                state["maxBudgetContinuations"] = MAX_BUDGET_CONTINUATIONS
+                changed = True
             if reason in ("inaccessible_evidence", "needs_clarification"):
                 state["status"] = "needs-attention"
                 state["stopReason"] = reason
                 state["error"] = _stop_reason_message(reason)
-                self.store.write_run_state(project_id, state)
+                changed = True
+            elif (reason == "diminishing_returns" or
+                  (reason == "budget_exhausted" and continuations >= MAX_BUDGET_CONTINUATIONS)):
+                # Existing projects may predate the counter.  Their run.md is
+                # the durable audit trail, so two recorded extensions are
+                # enough to migrate them out of the endless Continue loop.
+                if (state.get("citationCheck") or {}).get("ok") is True:
+                    state["status"] = "completed-known-limitations"
+                    state["stopReason"] = reason
+                    state["error"] = _stop_reason_message("known_limitations")
+                    changed = True
             elif reason in ("important_uncertainty", "budget_exhausted") and state.get("status") == "completed":
                 state["status"] = "completed-with-warnings"
                 state["stopReason"] = reason
                 state["error"] = _stop_reason_message(reason)
+                changed = True
+            if changed:
                 self.store.write_run_state(project_id, state)
 
     def _claim(self, project_id, pid):
@@ -448,6 +492,16 @@ class Runner:
         return self._launch(project_id, kind="resume")
 
     def continue_budget(self, project_id):
+        state = self.store.read_run_state(project_id)
+        run_id = state.get("runId") or _discover_run_id(self.store.project_dir(project_id))
+        count = max(state.get("budgetContinuations", 0) if isinstance(
+            state.get("budgetContinuations", 0), int) else 0,
+                    _budget_continuation_count(self.store.project_dir(project_id), run_id))
+        if count >= MAX_BUDGET_CONTINUATIONS:
+            raise RunnerError(
+                "This research already used its two continuation passes. The report is complete "
+                "with known limitations; start a new project only if you want a different scope."
+            )
         return self._launch(project_id, kind="continue-budget")
 
     def clarify(self, project_id, text):
@@ -509,7 +563,15 @@ class Runner:
                     detail = (state.get("citationCheck") or {}).get("detail")
                     prompt = build_repair_message(project_id, detail)
                 elif kind == "continue-budget":
-                    prompt = build_budget_continuation_message(project_id, meta.get("approach"))
+                    saved_count = state.get("budgetContinuations", 0)
+                    if not isinstance(saved_count, int) or saved_count < 0:
+                        saved_count = 0
+                    existing_count = max(
+                        saved_count,
+                        _budget_continuation_count(
+                            self.store.project_dir(project_id), state.get("runId")))
+                    prompt = build_budget_continuation_message(
+                        project_id, meta.get("approach"), existing_count + 1)
                 else:
                     prompt = build_resume_message(project_id)
 
@@ -540,6 +602,12 @@ class Runner:
                 "startedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "pid": proc.pid, "stopReason": None, "error": None,
             })
+            if kind == "start":
+                state["budgetContinuations"] = 0
+                state["maxBudgetContinuations"] = MAX_BUDGET_CONTINUATIONS
+            elif kind == "continue-budget":
+                state["budgetContinuations"] = existing_count + 1
+                state["maxBudgetContinuations"] = MAX_BUDGET_CONTINUATIONS
             self.store.write_run_state(project_id, state)
 
             thread = threading.Thread(
@@ -699,6 +767,14 @@ class Runner:
             if stop_reason in ("inaccessible_evidence", "needs_clarification"):
                 state["status"] = "needs-attention"
                 state["error"] = _stop_reason_message(stop_reason)
+            elif stop_reason == "diminishing_returns" and citation_result.get("ok") is True:
+                state["status"] = "completed-known-limitations"
+                state["error"] = _stop_reason_message("known_limitations")
+            elif (stop_reason == "budget_exhausted" and
+                  state.get("budgetContinuations", 0) >= MAX_BUDGET_CONTINUATIONS and
+                  citation_result.get("ok") is True):
+                state["status"] = "completed-known-limitations"
+                state["error"] = _stop_reason_message("known_limitations")
             elif stop_reason in ("important_uncertainty", "budget_exhausted"):
                 state["status"] = "completed-with-warnings"
                 state["error"] = _stop_reason_message(stop_reason)
@@ -774,14 +850,36 @@ def _extract_stop_reason(pdir: Path, run_id):
     #   ## Stop reason\n**supported_within_scope**
     #   stop reason: inaccessible_evidence
     #   **Stop reason: `budget_exhausted`.**
-    inline = re.search(
-        r"(?im)^\s*(?:[-*]\s*)?(?:\*\*)?stop reason(?:\*\*)?\s*:\s*"
-        r"(?:\*\*)?\s*`?([a-z_]+)", text)
-    if inline:
-        return inline.group(1).lower()
-    section = re.search(
-        r"(?ims)^#{1,6}\s+stop reason\s*$\s*(?:\*\*)?\s*`?([a-z_]+)", text)
-    return section.group(1).lower() if section else None
+    # A resumed run keeps earlier checkpoints in run.md. The latest recorded
+    # reason is authoritative; taking the first match would make a later
+    # diminishing_returns decision look like the old budget checkpoint.
+    matches = []
+    for match in re.finditer(
+            r"(?im)^\s*(?:[-*]\s*)?(?:\*\*)?(?:final\s+)?stop reason(?:\*\*)?\s*:\s*"
+            r"(?:\*\*)?\s*`?([a-z_]+)", text):
+        matches.append((match.start(), match.group(1).lower()))
+    for match in re.finditer(
+            r"(?ims)^#{1,6}\s+(?:final\s+)?stop reason\s*$\s*"
+            r"(?:\*\*)?\s*`?([a-z_]+)", text):
+        matches.append((match.start(), match.group(1).lower()))
+    return max(matches, key=lambda item: item[0])[1] if matches else None
+
+
+def _budget_continuation_count(pdir: Path, run_id):
+    """Recover the number of explicitly recorded budget extensions.
+
+    New runs also store the counter in state/run.json.  This parser migrates
+    older projects using their durable run.md audit trail, including the
+    original unnumbered "Budget extension" heading and numbered follow-ups.
+    """
+    if not run_id:
+        return 0
+    p = pdir / "runs" / run_id / "run.md"
+    if not p.is_file():
+        return 0
+    text = p.read_text(encoding="utf-8", errors="replace")
+    return len(re.findall(
+        r"(?im)^#{1,6}\s+budget extension(?:\s+#\d+)?(?:\s|\(|$)", text))
 
 
 def _stop_reason_message(reason):
@@ -798,6 +896,11 @@ def _stop_reason_message(reason):
         "budget_exhausted": (
             "The research budget was exhausted before every planned check was completed. "
             "Treat the report as qualified rather than complete."
+        ),
+        "known_limitations": (
+            "Research is complete for this scope after the allowed follow-up passes. Remaining "
+            "gaps are documented in the report and further bounded research is unlikely to "
+            "materially change its practical conclusions."
         ),
     }.get(reason)
 

@@ -187,9 +187,10 @@ below, not a weaker permission mode.
   **Completed with warnings**, because it was not independently validated. It shows the safe reason
   but no repair button, since the checker did not find a specific report defect.
 - **A research budget that runs out before every planned check**: the report remains readable as
-  **Completed with warnings** and offers **Continue research** when a saved session exists. The
-  button explains that it uses more allowance and authorizes one additional bounded pass focused
-  on unfinished checks, rather than restarting or silently removing the workflow's ceiling.
+  **Completed with warnings** and offers **Continue research** when a saved session exists and the
+  two-pass continuation allowance is not exhausted. The button explains that it uses more allowance
+  and authorizes one additional bounded pass focused on unfinished checks. After two passes, the
+  project becomes **Completed — known limitations** and the button disappears.
 - **You click Stop** while a run is Starting or Researching: the backend sends the Claude process a
   graceful termination signal (`SIGTERM` to its process group on POSIX; `CTRL_BREAK_EVENT` then
   `taskkill /T /F` on Windows), waits a short grace period, and force-kills only if it hasn't exited.
@@ -214,8 +215,8 @@ below, not a weaker permission mode.
 
 ### Browser workspace states
 
-**Ready to start · Starting… · Researching · Needs attention · Completed · Completed with warnings
-· Failed · Interrupted — resumable.** These come from the run's actual saved status
+**Ready to start · Starting… · Researching · Needs attention · Completed · Completed — known
+limitations · Completed with warnings · Failed · Interrupted — resumable.** These come from the run's actual saved status
 (`projects/<id>/state/run.json`) and current files on disk — never a simulated countdown. While
 researching, the page polls the backend every ~2 seconds and shows the run's own saved notes
 (`run.md`, rendered) plus a short activity feed of generic tool-use labels ("Reading a project
@@ -269,14 +270,17 @@ repair.
 
 ### Continuing after an exhausted research budget
 
-When the saved stop reason is `budget_exhausted`, the warning card offers **Continue research**.
-The narrow `POST /continue-budget` endpoint accepts only a project in that exact state with a saved
-session. It resumes that session and explicitly authorizes one additional bounded pass while
+When the saved stop reason is `budget_exhausted`, the warning card offers **Continue research**
+until the project has used two explicit continuation passes. The narrow `POST /continue-budget`
+endpoint accepts only a project in that exact state with a saved session and remaining continuation
+allowance. It resumes that session and explicitly authorizes one additional bounded pass while
 preserving the existing report and evidence: Quick adds at most 3 collection calls and 2
 verification checks; Deep adds at most 8 and 5. The resumed coordinator must record the extension
-and actual usage in `run.md`, avoid repeating completed work, and stop with the same warning again
-if material checks still remain. Each click is therefore a visible decision to spend additional
-Claude allowance, not an automatic retry loop.
+and actual usage in `run.md`, avoid repeating completed work, and distinguish material uncertainty
+from diminishing returns. After two passes the project becomes **Completed — known limitations**
+and the button is removed. Existing projects recover their count from the budget-extension headings
+in `run.md`, so updating the app also closes old endless loops. Each click is therefore a visible
+decision to spend additional Claude allowance, not an automatic retry loop.
 
 ### Removing a project
 

@@ -305,6 +305,12 @@ class Handler(BaseHTTPRequestHandler):
         if not app.store.exists(pid):
             return self._error(404, "Project not found.")
         state = app.store.read_run_state(pid)
+        if state.get("status") == "completed-known-limitations":
+            return self._error(
+                409,
+                "This research already used its two continuation passes. The report is complete "
+                "with known limitations."
+            )
         if (state.get("status") != "completed-with-warnings" or
                 state.get("stopReason") != "budget_exhausted"):
             return self._error(409, "This project did not stop because its research budget was exhausted.")

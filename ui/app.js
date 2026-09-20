@@ -1481,9 +1481,10 @@
       "- **Needs attention** — needs information from you, or could not access the evidence required to answer. " +
         "Open it to answer or resume as appropriate.",
       "- **Completed** — a report was written and its citations passed an independent structural check.",
+      "- **Completed — known limitations** — useful bounded follow-ups are finished, the citation check passed, and remaining gaps are documented. No more continuation is needed.",
       "- **Completed — with warnings** — a report was written, but research ended with a material " +
         "uncertainty or budget limit, the structural citation check found an issue, or the check could not run. The report " +
-        "is still shown. A budget-limited run offers **Continue research** for one additional bounded pass; " +
+        "is still shown. A budget-limited run offers **Continue research** for another bounded pass, up to two passes total; " +
         "a citation repair button appears only when a structural issue was actually found.",
       "- **Failed** — did not finish; read the error message shown. If a saved Claude session exists, " +
         "the screen also offers **Try resuming** after you correct the problem.",
@@ -1561,7 +1562,8 @@
         "in Deep mode.",
       "- **The research budget is exhausted** → the report remains available with a warning. Click " +
         "**Continue research** for one additional bounded pass focused on unfinished checks. This " +
-        "preserves the same session and existing evidence, and uses more Claude allowance.",
+        "preserves the same session and existing evidence, and uses more Claude allowance. At most " +
+        "two continuation passes are offered; afterward the project becomes **Completed — known limitations**.",
       "- **A report fails its automatic citation check** → the project becomes **Completed — with " +
         "warnings** rather than an ordinary Completed; the report is still shown, and you can ask " +
         "Claude to fix the specific issue found.",
@@ -1584,6 +1586,7 @@
       "| No report on a Completed project | Check that project's log file (see `USER_GUIDE.md`, Advanced section) |",
       "| Citation link does nothing | That report likely has a structural issue; look for a Completed — with warnings state |",
       "| Project shows Completed — with warnings | Follow the action shown: **Continue research** for an exhausted research budget, **Ask Claude to fix this** for a citation defect, or read the limitation when no automatic action applies |",
+      "| Project shows Completed — known limitations | The useful bounded follow-ups are finished. Read the report normally; start a new project only for a different scope or new source material. |",
       "| Citation check unavailable | The report exists, but its citation structure was not validated; read the reason shown and retry after fixing the local checker |",
       "| Can't remove a project | Research must be stopped first; the confirmation text must exactly match the project's title |",
       "",
@@ -1696,6 +1699,7 @@
     "researching": { label: "Researching", pill: "in-progress" },
     "needs-attention": { label: "Needs attention", pill: "needs-attention" },
     "completed": { label: "Completed", pill: "complete" },
+    "completed-known-limitations": { label: "Completed — known limitations", pill: "complete" },
     "completed-with-warnings": { label: "Completed — with warnings", pill: "needs-attention" },
     "failed": { label: "Failed", pill: "failed" },
     "interrupted": { label: "Interrupted — resumable", pill: "needs-attention" }
@@ -1844,7 +1848,7 @@
     if (p.status === "ready") return renderReadyState(p, right);
     if (p.status === "starting" || p.status === "researching") return renderRunningState(p, right, left);
     if (p.status === "needs-attention") return renderNeedsAttentionState(p, right);
-    if (p.status === "completed" || p.status === "completed-with-warnings") return renderCompletedState(p, right);
+    if (p.status === "completed" || p.status === "completed-with-warnings" || p.status === "completed-known-limitations") return renderCompletedState(p, right);
     if (p.status === "failed") return renderFailedState(p, right);
     if (p.status === "interrupted") return renderInterruptedState(p, right);
     right.appendChild(el('<div class="card"><p class="muted">Unknown status: ' + esc(p.status) + '</p></div>'));
@@ -2043,6 +2047,7 @@
 
   function renderCompletedState(p, right) {
     var hasWarnings = p.status === "completed-with-warnings";
+    var hasKnownLimitations = p.status === "completed-known-limitations";
     var checkFailed = !!(p.citationCheck && p.citationCheck.ok === false);
     var checkUnavailable = !!(p.citationCheck && p.citationCheck.ok == null);
     var researchWarning = !checkFailed && !checkUnavailable && hasWarnings;
@@ -2052,7 +2057,13 @@
     else if (checkFailed) citeBadge = '<span class="pill needs-attention">Citation check found issues</span>';
     else if (checkUnavailable) citeBadge = '<span class="pill needs-attention">Citation check unavailable</span>';
 
-    if (hasWarnings) {
+    if (hasKnownLimitations) {
+      right.appendChild(el('<div class="card">' +
+        '<h2 style="margin-top:0">Completed — known limitations</h2>' +
+        '<p class="muted">' + esc(p.error || 'Research is complete for this scope. Remaining gaps are documented in the report.') + '</p>' +
+        '<div class="callout info"><strong>No further continuation is needed.</strong> The most useful follow-up checks have already been run. Start a new project only if you want to investigate a different scope or supply new source material.</div>' +
+        helpLinkHtml("reading-the-report", "What does this mean?") + '</div>'));
+    } else if (hasWarnings) {
       var warnCard = el('<div class="card">' +
         '<h2 style="margin-top:0">Completed — with warnings</h2>' +
         '<p class="muted">' + (checkFailed
