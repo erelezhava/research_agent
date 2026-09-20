@@ -5,8 +5,11 @@ Every flag choice here was verified empirically against the installed CLI
 section for the specific probes and their results. Notably:
 
 - `--allowedTools` does NOT restrict tool availability in -p mode in this
-  version (a permission-prompt hint only) — the actual hard boundary is
+  version; it pre-approves named tools. The actual availability boundary is
   `--tools`, confirmed by asking the model to enumerate its own granted tools.
+  Both are therefore required for unattended research: `--tools` limits the
+  surface, while `--allowedTools` prevents the approved web tools from being
+  denied merely because no interactive approval surface exists.
 - Without `--strict-mcp-config`, unrelated account-level MCP connectors
   (Gmail, Drive, Spotify, Docs) leak into the toolset even under a tight
   `--tools` allowlist. `--strict-mcp-config` with no `--mcp-config` removes
@@ -264,6 +267,7 @@ def build_argv(claude_bin, prompt, session_id, model=DEFAULT_MODEL, resume=False
             "--model", model,
             "--output-format", "stream-json", "--verbose",
             "--tools", ALLOWED_TOOLS,
+            "--allowedTools", ALLOWED_TOOLS,
             "--permission-mode", "acceptEdits",
             "--permission-prompts", "none",
             "--strict-mcp-config",
@@ -349,16 +353,35 @@ class Runner:
         if project_id in self._active:
             return  # this process is still watching it live; nothing to fix
         state = self.store.read_run_state(project_id)
-        if state.get("status") not in ("starting", "researching"):
+        if state.get("status") in ("starting", "researching"):
+            if self._pid_alive(state.get("pid")):
+                return  # plausibly still running under another process; leave it
+            state["status"] = "interrupted"
+            state["pid"] = None
+            state["error"] = ("This project stopped when the app or your computer closed before it "
+                               "finished. " + ("You can try Resume." if state.get("sessionId") else
+                               "No previous session was recorded, so it can't be resumed — start a new one."))
+            self.store.write_run_state(project_id, state)
             return
-        if self._pid_alive(state.get("pid")):
-            return  # plausibly still running under another process; leave it
-        state["status"] = "interrupted"
-        state["pid"] = None
-        state["error"] = ("This project stopped when the app or your computer closed before it "
-                           "finished. " + ("You can try Resume." if state.get("sessionId") else
-                           "No previous session was recorded, so it can't be resumed — start a new one."))
-        self.store.write_run_state(project_id, state)
+
+        # Repair status written by older backend versions that treated any
+        # syntactically valid report as Completed, even when run.md explicitly
+        # recorded that evidence access was blocked. This reconciliation
+        # preserves the research content and updates only its saved status so
+        # the project tells the same truth as the run itself.
+        if state.get("status") in ("completed", "completed-with-warnings"):
+            run_id = state.get("runId") or _discover_run_id(self.store.project_dir(project_id))
+            reason = _extract_stop_reason(self.store.project_dir(project_id), run_id)
+            if reason in ("inaccessible_evidence", "needs_clarification"):
+                state["status"] = "needs-attention"
+                state["stopReason"] = reason
+                state["error"] = _stop_reason_message(reason)
+                self.store.write_run_state(project_id, state)
+            elif reason in ("important_uncertainty", "budget_exhausted") and state.get("status") == "completed":
+                state["status"] = "completed-with-warnings"
+                state["stopReason"] = reason
+                state["error"] = _stop_reason_message(reason)
+                self.store.write_run_state(project_id, state)
 
     def _claim(self, project_id, pid):
         storemod.atomic_write_json(self._active_file, {
@@ -614,6 +637,9 @@ class Runner:
             is_error = bool(result_event.get("is_error", True))
             subtype = result_event.get("subtype")
 
+        stop_reason = _extract_stop_reason(pdir, run_id)
+        state["stopReason"] = stop_reason
+
         if report_exists and not is_error:
             citation_result = self._run_citation_check(project_id, run_id)
             state["citationCheck"] = citation_result
@@ -622,9 +648,21 @@ class Runner:
             # inconclusive check (None: missing/timed out/could not run) need a
             # visible warning; unavailable validation must never look like a
             # successful validation.
-            state["status"] = "completed" if citation_result.get("ok") is True else "completed-with-warnings"
-            state["stopReason"] = _extract_stop_reason(pdir, run_id)
-            state["error"] = None
+            if stop_reason in ("inaccessible_evidence", "needs_clarification"):
+                state["status"] = "needs-attention"
+                state["error"] = _stop_reason_message(stop_reason)
+            elif stop_reason in ("important_uncertainty", "budget_exhausted"):
+                state["status"] = "completed-with-warnings"
+                state["error"] = _stop_reason_message(stop_reason)
+            elif stop_reason not in ("supported_within_scope", "diminishing_returns"):
+                # A report without the workflow's required stop reason must
+                # never look like a fully verified clean completion.
+                state["status"] = "completed-with-warnings"
+                state["error"] = "The report did not record why research stopped. Review it carefully."
+            else:
+                state["status"] = ("completed" if citation_result.get("ok") is True
+                                   else "completed-with-warnings")
+                state["error"] = None
         elif result_text and _looks_like_usage_limit(result_text):
             state["status"] = "interrupted"
             state["error"] = _safe_excerpt(result_text)
@@ -636,7 +674,7 @@ class Runner:
             # Process exited cleanly but produced no report: a deliberate
             # early stop (e.g. needs_clarification) is the honest reading.
             state["status"] = "needs-attention"
-            state["error"] = None
+            state["error"] = _stop_reason_message(stop_reason)
         self.store.write_run_state(project_id, state)
 
     def _run_citation_check(self, project_id, run_id):
@@ -680,8 +718,36 @@ def _extract_stop_reason(pdir: Path, run_id):
     if not p.is_file():
         return None
     text = p.read_text(encoding="utf-8", errors="replace")
-    m = re.search(r"\*\*([a-z_]+)\*\*", text[text.find("Stop reason"):]) if "Stop reason" in text else None
-    return m.group(1) if m else None
+    # Accept the formats the workflow naturally produces, including:
+    #   ## Stop reason\n**supported_within_scope**
+    #   stop reason: inaccessible_evidence
+    #   **Stop reason: `budget_exhausted`.**
+    inline = re.search(
+        r"(?im)^\s*(?:[-*]\s*)?(?:\*\*)?stop reason(?:\*\*)?\s*:\s*"
+        r"(?:\*\*)?\s*`?([a-z_]+)", text)
+    if inline:
+        return inline.group(1).lower()
+    section = re.search(
+        r"(?ims)^#{1,6}\s+stop reason\s*$\s*(?:\*\*)?\s*`?([a-z_]+)", text)
+    return section.group(1).lower() if section else None
+
+
+def _stop_reason_message(reason):
+    return {
+        "inaccessible_evidence": (
+            "Research could not access the evidence sources it needed. Web access or local "
+            "source material must be available before this run can continue."
+        ),
+        "needs_clarification": "Research needs more information from you before it can continue.",
+        "important_uncertainty": (
+            "Research finished with an important unresolved uncertainty. Read the report's "
+            "limitations before relying on its recommendation."
+        ),
+        "budget_exhausted": (
+            "The research budget was exhausted before every planned check was completed. "
+            "Treat the report as qualified rather than complete."
+        ),
+    }.get(reason)
 
 
 _USAGE_LIMIT_PATTERNS = re.compile(

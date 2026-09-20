@@ -808,23 +808,31 @@
     return parts.length ? "\n\nContext:\n- " + parts.join("\n- ") : "";
   }
 
+  // The browser already invokes the research workflow. People accustomed to
+  // the terminal may still paste a leading "/research"; remove that command
+  // marker from the subject instead of turning it into part of the title and
+  // generated prompt.
+  function researchQuestionText(value) {
+    return (value || "").trim().replace(/^\/research(?:\s+|$)/i, "").trim();
+  }
+
   function generatePrompts(d) {
-    var q = (d.question || "").trim();
+    var q = researchQuestionText(d.question);
     var ctx = promptContext(d);
     var quick =
       "Give a quick, practical answer to: \"" + q + "\".\n\n" +
       "Keep the scope narrow and focused on the decision. Compare only the main options at a high level — " +
-      "group similar items into families or tiers instead of listing every individual variant — and highlight " +
+      "group similar options into useful categories instead of listing every minor variant — and highlight " +
       "the few differences that actually affect the choice. Use a small number of strong, recent sources, and " +
       "skip background theory and exhaustive side-by-side detail. Deliver a concise report with a short summary " +
       "table and a clear recommendation, and state plainly anything that remains uncertain." + ctx;
     var deep =
       "Research this thoroughly: \"" + q + "\".\n\n" +
-      "Take a broad scope and compare the important options in detail, including meaningful sub-categories and " +
-      "alternatives. Where relevant, account for different generations or versions, product variants (for example " +
-      "desktop versus laptop), and the workloads or use cases that change the answer. Prefer primary sources and " +
-      "support important claims with independent evidence; investigate contradictions and notable alternatives. " +
-      "Consider performance evidence, power and efficiency, pricing, and real-world limitations. Break the work into " +
+      "Establish the criteria needed to answer the question, then examine the important methods, options, and " +
+      "alternatives in enough detail to support a decision. Account for versions, configurations, operating " +
+      "conditions, and use cases only when they materially change the answer. Prefer primary sources and support " +
+      "important claims with independent evidence; quantify results where the available evidence allows it, and " +
+      "investigate contradictions and practical limitations. Break the work into " +
       "several research tasks where that helps, keep evidence records, and verify the key claims. Deliver a detailed " +
       "report with a full comparison, a recommendation, and an explicit section on limitations and remaining uncertainty." + ctx;
     return { quick: quick, deep: deep };
@@ -934,7 +942,7 @@
   // Auto-derive the brief from current setup (question, depth, timeframe).
   function deriveBrief(d) {
     var base = DATA.brief || {};
-    var q = (d.question || "").trim();
+    var q = researchQuestionText(d.question);
     var matches = base.question && q.toLowerCase().slice(0, 30) === base.question.toLowerCase().slice(0, 30);
     var scaffold = matches ? base : {
       title: q.length > 60 ? q.slice(0, 57) + "…" : (q || "Untitled research"),
@@ -1470,10 +1478,11 @@
       "- **Researching** — actively running; a short real activity list updates automatically. A " +
         "**Stop research** button is available here — it preserves everything done so far so you " +
         "can Resume later.",
-      "- **Needs attention** — stopped before a report, usually needing something from you (see below).",
+      "- **Needs attention** — needs information from you, or could not access the evidence required to answer. " +
+        "Open it to answer or resume as appropriate.",
       "- **Completed** — a report was written and its citations passed an independent structural check.",
-      "- **Completed — with warnings** — a report was written, but that structural check found a " +
-        "real issue (e.g. a citation with no matching source), or the check could not run. The report " +
+      "- **Completed — with warnings** — a report was written, but research ended with a material " +
+        "uncertainty or budget limit, the structural citation check found an issue, or the check could not run. The report " +
         "is still shown. A repair button appears only when a structural issue was actually found.",
       "- **Failed** — did not finish; read the error message shown.",
       "- **Interrupted — resumable** — stopped partway (a usage limit, you clicking Stop, or the " +
@@ -1490,6 +1499,9 @@
         "Specific detail like this can materially improve the answer. (If a project has no " +
         "resumable session recorded — rare — the screen says so and starting a fresh project with " +
         "the detail included is the only option.)",
+      "",
+      "If evidence access itself was blocked, Needs attention shows the blocked-run record and a " +
+        "**Resume research** button instead. It does not ask you for unrelated clarification.",
       "",
       "## Reading the report",
       "",
@@ -1537,6 +1549,9 @@
         "does not include a general command shell.",
       "- **A source can't be opened** → recorded as a gap in the evidence, not treated as proof of " +
         "anything.",
+      "- **All evidence access is blocked** → the project becomes **Needs attention**, preserves its " +
+        "plan and session, and offers **Resume research** after the access problem is fixed; a saved " +
+        "failure explanation is never labeled as a completed answer.",
       "- **Real uncertainty remains at the end** → the report says so plainly; consider re-running " +
         "in Deep mode.",
       "- **A report fails its automatic citation check** → the project becomes **Completed — with " +
@@ -1554,7 +1569,7 @@
       "| \"Claude Code CLI is not available\" | Install Claude Code, then restart the app |",
       "| \"Claude Code is not signed in\" | Run `claude auth login` in a terminal |",
       "| \"another research run is already active\" | Only one run is allowed at a time — wait for it, or open it to see its status |",
-      "| Project shows Needs attention | See [Answering questions from the agent](#answering-questions-from-the-agent) above |",
+      "| Project shows Needs attention | Open it and follow the displayed action: answer its question, or resume after fixing evidence access |",
       "| Usage limit reached | Wait for it to reset, then click Resume |",
       "| No report on a Completed project | Check that project's log file (see `USER_GUIDE.md`, Advanced section) |",
       "| Citation link does nothing | That report likely has a structural issue; look for a Completed — with warnings state |",
@@ -1918,15 +1933,58 @@
   }
 
   function renderNeedsAttentionState(p, right) {
+    var evidenceBlocked = p.stopReason === "inaccessible_evidence";
     var card = el('<div class="card">' +
       '<h2 style="margin-top:0">Needs your attention</h2>' +
-      '<p class="muted">The run stopped before producing a report — usually because it needs clarification ' +
-      'from you. Its own saved notes are below. ' + helpLinkHtml("answering-questions-from-the-agent", "How do I answer this?") + '</p></div>');
+      '<p class="muted">' + (evidenceBlocked
+        ? 'The run could not access the evidence sources it needed, so it did not produce a real answer. Its saved notes are below. '
+        : 'The run stopped before producing a report — usually because it needs clarification from you. Its own saved notes are below. ') +
+      helpLinkHtml(evidenceBlocked ? "pausing-resuming-and-failures" : "answering-questions-from-the-agent",
+        evidenceBlocked ? "What happened?" : "How do I answer this?") + '</p>' +
+      (p.error ? '<div class="callout sim"><strong>Details:</strong> ' + esc(p.error) + '</div>' : '') + '</div>');
     right.appendChild(card);
     if (p.runMarkdown) {
       var doc = el('<div class="card"><h3 style="margin-top:0">Saved run notes</h3><div class="doc" id="attn-doc"></div></div>');
       right.appendChild(doc);
       doc.querySelector("#attn-doc").innerHTML = renderMarkdown(p.runMarkdown);
+    }
+
+    if (evidenceBlocked) {
+      if (p.reportMarkdown) {
+        var blockedReport = el('<div class="card"><h3 style="margin-top:0">Blocked-run record</h3>' +
+          '<p class="small muted">This explains the failed attempt; it is not a research answer.</p>' +
+          '<div class="doc" id="blocked-report-doc"></div></div>');
+        right.appendChild(blockedReport);
+        blockedReport.querySelector("#blocked-report-doc").innerHTML = renderMarkdown(p.reportMarkdown);
+      }
+      if (!p.sessionId) {
+        right.appendChild(el('<div class="card"><h3 style="margin-top:0">Try again with web access</h3>' +
+          '<p class="muted">This project has no previous Claude session recorded, so this exact run cannot ' +
+          'be resumed. Start a new research project with the same question; new runs pre-approve the app\'s ' +
+          'restricted WebSearch and WebFetch tools.</p></div>'));
+        return;
+      }
+      var resumeCard = el('<div class="card"><h3 style="margin-top:0">Try again with web access</h3>' +
+        '<p class="hint">Resume continues this same research session and preserves its plan. The app now ' +
+        'pre-approves its restricted WebSearch and WebFetch tools.</p>' +
+        '<div id="blocked-resume-msg"></div>' +
+        '<div class="btn-row"><button class="btn" id="blocked-resume-btn">Resume research</button></div></div>');
+      right.appendChild(resumeCard);
+      var resumeBtn = resumeCard.querySelector("#blocked-resume-btn");
+      resumeBtn.addEventListener("click", function () {
+        resumeBtn.disabled = true;
+        resumeBtn.textContent = "Resuming…";
+        var resumeMsg = resumeCard.querySelector("#blocked-resume-msg");
+        apiFetch("/api/projects/" + encodeURIComponent(p.id) + "/resume", { method: "POST", body: {} })
+          .then(function () { loadAndRenderServerProject(p.id, document.getElementById("server-ws-slot")); })
+          .catch(function (e) {
+            resumeBtn.disabled = false;
+            resumeBtn.textContent = "Resume research";
+            resumeMsg.innerHTML = "";
+            resumeMsg.appendChild(el('<div class="msg error" role="alert">' + esc(e.message) + '</div>'));
+          });
+      });
+      return;
     }
 
     var replyCard = el('<div class="card"></div>');
@@ -1975,6 +2033,7 @@
     var hasWarnings = p.status === "completed-with-warnings";
     var checkFailed = !!(p.citationCheck && p.citationCheck.ok === false);
     var checkUnavailable = !!(p.citationCheck && p.citationCheck.ok == null);
+    var researchWarning = !checkFailed && !checkUnavailable && hasWarnings;
     var citeBadge = "";
     if (p.citationCheck && p.citationCheck.ok === true) citeBadge = '<span class="pill complete">Citation check passed</span>';
     else if (checkFailed) citeBadge = '<span class="pill needs-attention">Citation check found issues</span>';
@@ -1985,9 +2044,11 @@
         '<h2 style="margin-top:0">Completed — with warnings</h2>' +
         '<p class="muted">' + (checkFailed
           ? 'The report below is real and readable, but an independent, local structural check of its citations found a problem — for example a citation number with no matching source entry.'
-          : 'The report below is real and readable, but its citation structure could not be independently checked. This does not mean the citations passed or failed.') +
+          : (checkUnavailable
+            ? 'The report below is real and readable, but its citation structure could not be independently checked. This does not mean the citations passed or failed.'
+            : esc(p.error || 'The research ended with a material limitation that needs your attention.'))) +
         ' This is not an ordinary clean completion.</p>' +
-        (p.citationCheck && p.citationCheck.detail
+        (!researchWarning && p.citationCheck && p.citationCheck.detail
           ? '<div class="callout sim"><strong>Checker summary:</strong><br><span style="white-space:pre-wrap">' +
             esc(p.citationCheck.detail) + '</span></div>'
           : '') +

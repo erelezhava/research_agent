@@ -195,6 +195,14 @@ class UnsafeIdTests(ServerTestCase):
         })
         self.assertEqual(status, 400, data)
 
+    def test_long_title_keeps_a_descriptive_safe_folder_name(self):
+        pid = storemod.new_project_id(
+            "Transmission line insertion loss and propagation delay for an existing PCB stack-up"
+        )
+        self.assertTrue(pid.startswith("transmission-line-insertion-loss"), pid)
+        self.assertLessEqual(len(pid), 63)
+        self.assertTrue(storemod.is_safe_id(pid))
+
 
 class SingleRunTests(ServerTestCase):
     def test_only_one_active_run(self):
@@ -255,6 +263,23 @@ class OutcomeTests(ServerTestCase):
         self.assertEqual(final["status"], "needs-attention")
         self.assertIsNone(final.get("reportMarkdown"))
         self.assertIn("clarification", final.get("runMarkdown") or "")
+
+    def test_inaccessible_evidence_is_needs_attention_and_resumable(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "inaccessible_evidence")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        final = self.wait_terminal(pid)
+        self.assertEqual(final["status"], "needs-attention")
+        self.assertEqual(final["stopReason"], "inaccessible_evidence")
+        self.assertIn("could not access", final["error"].lower())
+        self.assertIn("Blocked report", final["reportMarkdown"])
+
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        status, data = self.request("POST", f"/api/projects/{pid}/resume")
+        self.assertEqual(status, 202, data)
+        final2 = self.wait_terminal(pid)
+        self.assertEqual(final2["status"], "completed")
+        self.assertEqual(final2["stopReason"], "supported_within_scope")
 
     def test_resume_rejected_when_not_in_resumable_state(self):
         pid = self.create_project()  # never started; status is "ready"
@@ -333,6 +358,24 @@ class RestartRecoveryTests(ServerTestCase):
         self.assertEqual(status, 200)
         found = [p for p in data["projects"] if p["id"] == pid][0]
         self.assertEqual(found["status"], "interrupted")
+
+    def test_old_false_completed_blocked_run_is_reconciled(self):
+        self.set_env("FAKE_CLAUDE_SCENARIO", "inaccessible_evidence")
+        pid = self.create_project()
+        self.request("POST", f"/api/projects/{pid}/start")
+        self.wait_terminal(pid)
+
+        # Simulate the state written by the older backend seen in the real
+        # blocked PCB run: run.md tells the truth, but run.json says completed.
+        state_path = self.root / "projects" / pid / "state" / "run.json"
+        state = json.loads(state_path.read_text())
+        state.update(status="completed", stopReason=None, error=None)
+        state_path.write_text(json.dumps(state))
+
+        status, data = self.request("GET", f"/api/projects/{pid}")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["project"]["status"], "needs-attention")
+        self.assertEqual(data["project"]["stopReason"], "inaccessible_evidence")
 
 
 class NetworkSecurityTests(ServerTestCase):
@@ -433,6 +476,15 @@ class ToolPolicyTests(ServerTestCase):
         tools = argv[argv.index("--tools") + 1].split(",")
         for expected in ("Read", "Write", "Edit", "Grep", "Glob", "WebSearch", "WebFetch", "Task"):
             self.assertIn(expected, tools)
+
+    def test_restricted_tools_are_also_preapproved_for_unattended_run(self):
+        argv, _ = self._argv_for()
+        restricted = argv[argv.index("--tools") + 1].split(",")
+        preapproved = argv[argv.index("--allowedTools") + 1].split(",")
+        self.assertEqual(set(preapproved), set(restricted))
+        self.assertIn("WebSearch", preapproved)
+        self.assertIn("WebFetch", preapproved)
+        self.assertNotIn("Bash", preapproved)
 
 
 class StopTests(ServerTestCase):

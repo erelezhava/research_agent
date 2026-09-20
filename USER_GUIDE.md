@@ -261,9 +261,9 @@ these:
 | **Ready to start** | The brief is approved but research hasn't begun | Review the prompt and the model it will use, then click **Start research** when ready |
 | **Starting…** | The research process is being launched | Just wait a moment — this is brief. A **Stop** button is available if you change your mind. |
 | **Researching** | Real research is actively running | Watch the activity list if you like, or leave and come back later. A **Stop** button lets you pause it early (see [section 11](#11-pausing-resuming-and-failures)). |
-| **Needs attention** | It stopped before writing a report, usually because it needs something from you | Answer directly in the browser (see [section 8](#8-answering-questions-from-the-agent)) |
+| **Needs attention** | It needs information from you, or it could not access the evidence needed to answer | Open the project: either answer its question or use **Resume research** after fixing the access problem |
 | **Completed** | A report was written and passed its automatic citation check | Open the project to read it (see [section 9](#9-reading-the-report)) |
-| **Completed with warnings** | A report was written, but the automatic citation check either found a structural issue or could not complete | The report is still shown in full; read the warning note and see [section 11](#11-pausing-resuming-and-failures) |
+| **Completed with warnings** | A report was written, but a material uncertainty/budget limit remains, or the citation check found a problem or could not complete | The report is still shown in full; read the warning note and see [section 11](#11-pausing-resuming-and-failures) |
 | **Failed** | It did not finish successfully | Read the error message; see [section 13](#13-troubleshooting) |
 | **Interrupted — resumable** | It stopped partway (a usage limit, you clicking **Stop**, or the app/computer closing) | Click **Resume** to continue the same work |
 
@@ -282,6 +282,10 @@ button right there in the browser. Type the missing detail and click **Continue 
 resumes the *same* research session with your answer, rather than starting over: everything already
 gathered stays in place. (If the project has no resumable session for some reason, the workspace
 shows a clear message instead and suggests starting a new project.)
+
+If evidence access itself was blocked, **Needs attention** shows a blocked-run record and a
+**Resume research** button instead of asking you for clarification. Resume after updating the app
+or correcting the access problem; the existing plan and session are preserved.
 
 Practical examples of the kind of detail that helps:
 
@@ -371,6 +375,7 @@ In plain terms, it holds:
 | **Your internet connection drops** | The research workflow will typically report this as a source it couldn't reach, not a hard crash, and continue with what it has | Read the report's limitations section for what wasn't checked |
 | **Claude needs a permission it wasn't already granted** | That specific action is safely declined and logged; a narrow, fixed set of actions is pre-approved for unattended research (reading/writing project files, and web search/fetch — browser-started sessions have no general command-execution ability) | If this repeatedly blocks a real need, it will show up in the run's saved notes or the Failed state's message |
 | **A source can't be opened** | Recorded as a gap in that source's evidence, not treated as proof something is false | Read the limitations section; try providing the source directly in your question if you have it |
+| **All evidence access is blocked** | The project shows **Needs attention**, not Completed, even if Claude saved a document explaining the failure | Fix the access problem and click **Resume research**; the same session and research plan continue |
 | **Research stops with real uncertainty remaining** | This is normal and expected — the report says so plainly rather than guessing | Read the "limitations" section; consider re-running in Deep mode for more thorough checking |
 | **A report fails its automatic citation check** | The project shows **Completed with warnings** rather than plain Completed; the report is still shown in full, with the checker's safe summary and an **"Ask Claude to fix this"** button | Click "Ask Claude to fix this" to have the same session repair the structural issue and re-check, or read the report a little more carefully around its citations yourself — this flags a structural issue, not a guaranteed error |
 | **The automatic citation check cannot run or times out** | The project also shows **Completed with warnings**, because the report was not independently validated | Read the reason shown and inspect citations yourself; fix the local checker and resume or re-run if you need a validated result. No repair button appears because the checker did not identify a specific report defect |
@@ -421,12 +426,12 @@ is needed to read or restore them later.
 | "Claude Code is not signed in" | You haven't run `claude auth login` yet (or it expired) | Run `claude auth login` in a terminal, then try Start research again |
 | Start research does nothing / shows an error immediately | Usually one of the two rows above | Check the exact message shown — it names the specific problem |
 | "another research run is already active" | This app only allows **one** research run at a time, across all projects | Wait for the current one to finish, or open it and see its status |
-| Project shows "Needs attention" | The research stopped before writing a report, often needing more detail from you | See [section 8](#8-answering-questions-from-the-agent) |
+| Project shows "Needs attention" | The research needs more detail from you, or evidence access was blocked | Open it and follow the displayed action: answer the question or click **Resume research** after access is fixed |
 | "Your Claude usage limit was reached during this run" | Your Claude account's allowance ran out | Wait for it to reset, then click **Resume** on that project |
 | No report appears on a Completed project | Rare — the run may not have written a report despite completing | Check the project's log file (see [section 14](#14-advanced-section)) for detail |
 | Clicking a citation number does nothing | The report may not have a matching Sources entry for that number | This indicates a structural issue in that particular report; the citation-check badge on the report will usually also flag it |
 | A document I selected doesn't seem to affect the research | This is expected — documents are not read, only their names are noted | Include the relevant details as text in your question instead, for now (see [section 10](#10-project-files-and-privacy)) |
-| A project's report shows "Completed with warnings" | The automatic citation check found a structural issue, timed out, or could not run | Read the warning text. Use "Ask Claude to fix this" only when offered; otherwise restore the checker and validate again, or check the citations yourself |
+| A project's report shows "Completed with warnings" | The run ended with material uncertainty/a budget limit, or the citation check found an issue, timed out, or could not run | Read the warning text. Use "Ask Claude to fix this" only when offered; otherwise follow the specific limitation shown |
 | I can't click Remove on a project | Removal is refused while that project is the currently active research run | Stop or wait for that run to finish first, then remove it |
 
 ## 14. Advanced section

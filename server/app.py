@@ -241,7 +241,9 @@ class Handler(BaseHTTPRequestHandler):
         if not app.store.exists(pid):
             return self._error(404, "Project not found.")
         state = app.store.read_run_state(pid)
-        if state.get("status") not in ("interrupted", "failed"):
+        resumable_attention = (state.get("status") == "needs-attention" and
+                               state.get("stopReason") == "inaccessible_evidence")
+        if state.get("status") not in ("interrupted", "failed") and not resumable_attention:
             return self._error(409, "This project is not in a resumable state.")
         if not state.get("sessionId"):
             return self._error(409, "No previous session recorded to resume.")

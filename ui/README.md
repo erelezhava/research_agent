@@ -90,6 +90,7 @@ claude -p "<instructions + mode + your approved prompt, verbatim>" \
   --model sonnet \
   --output-format stream-json --verbose \
   --tools Read,Write,Edit,Grep,Glob,WebSearch,WebFetch,Task \
+  --allowedTools Read,Write,Edit,Grep,Glob,WebSearch,WebFetch,Task \
   --permission-mode acceptEdits \
   --permission-prompts none \
   --strict-mcp-config \
@@ -128,9 +129,11 @@ built into or interpreted by a shell (see Security below).
 Every flag above was **verified empirically** against the installed CLI (2.1.278) rather than
 assumed — worth knowing since some of it is genuinely non-obvious:
 
-- `--allowedTools` does **not** restrict tool availability in `-p` mode on this version — it only
-  affects what would be auto-approved if something prompted. The real hard boundary is `--tools`,
-  confirmed by asking the model to enumerate its own granted tools with each flag combination.
+- `--allowedTools` does **not** restrict tool availability in `-p` mode on this version — it
+  pre-approves the named tools. The hard availability boundary is `--tools`, confirmed by asking
+  the model to enumerate its own granted tools with each flag combination. Both flags are present:
+  the same narrow list is available and pre-approved, so WebSearch/WebFetch work without an
+  interactive approval window while Bash and unrelated tools remain unavailable.
 - Without `--strict-mcp-config`, unrelated account-level MCP connectors (Gmail, Drive, Spotify,
   Docs, in this Anthropic environment) leaked into the toolset even under a tight `--tools`
   allowlist. `--strict-mcp-config` with no `--mcp-config` removed all of them.
@@ -169,6 +172,10 @@ below, not a weaker permission mode.
 - **A permission denial** (something outside the granted tools): recorded and the run continues past
   it rather than crashing; if that denial prevents a report from being written at all, the project
   ends up **Needs attention** or **Failed** depending on how the run concluded.
+- **Evidence access is blocked for the whole run**: a saved failure explanation is not labeled as a
+  completed report. The project shows **Needs attention**, preserves the session and plan, and
+  offers **Resume research** after the access problem is fixed. Older projects falsely labeled
+  Completed are reconciled from their saved stop reason when reopened.
 - **A citation-check failure**: the backend's own independent `scripts/check_citations.py` process
   (not the Claude session — it has no Bash) runs after the session ends. If it finds a structural
   problem, the project shows **Completed with warnings** instead of plain **Completed** — the report
@@ -227,7 +234,7 @@ handler.
 
 ### Answering Needs-attention from the browser
 
-When a project is **Needs attention**, the workspace shows an **Add clarification** textarea and a
+When a project needs information from you, the workspace shows an **Add clarification** textarea and
 **Continue research** button (only when the project has a resumable session id — otherwise a clear
 fallback message explains there's nothing to resume and suggests starting a new project instead). A
 validated `POST /clarify` endpoint accepts only the clarification text for that specific project,
@@ -236,6 +243,9 @@ same Claude session with your text wrapped in an explicit
 `<<<USER_CLARIFICATION_BEGIN>>> ... <<<USER_CLARIFICATION_END>>>` delimiter that tells the model this
 is user-supplied research **data**, not new instructions. All of the project's existing files, runs,
 findings, and evidence are preserved — this resumes the same run, it does not start a new one.
+When the reason is inaccessible evidence rather than a missing user detail, the same state instead
+shows the blocked-run record and a **Resume research** button; it does not ask for irrelevant
+clarification.
 
 ### Citation-check failures and repair
 

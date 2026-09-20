@@ -34,10 +34,13 @@ class ValidationError(ValueError):
     """A client-supplied project field failed validation."""
 
 
+PROJECT_SLUG_LEN = 36  # leaves room for -YYYYMMDD-HHMMSS-xxxxxx within SAFE_ID's 63 chars
+
+
 def slugify(text, fallback="research"):
     s = (text or "").strip().lower()
     s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
-    s = s[:48].strip("-")
+    s = s[:PROJECT_SLUG_LEN].strip("-")
     return s or fallback
 
 

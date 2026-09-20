@@ -7,7 +7,7 @@ server/app.py end to end.
 
 Controlled entirely by environment variables set by the test:
 - FAKE_CLAUDE_SCENARIO: success | needs_attention | failure | usage_limit |
-  citation_fail | hang
+  inaccessible_evidence | citation_fail | hang
 - FAKE_CLAUDE_ARGV_DUMP: if set, the full argv is JSON-dumped there (one
   element per line) so a test can assert exactly what was passed — e.g. that
   a prompt containing shell metacharacters arrived verbatim as data, that no
@@ -115,12 +115,27 @@ def main():
         if project_id:
             write(f"projects/{project_id}/runs/{run_id}/run.md",
                   "# Run: run-fake-1\n\n## Question\nTest question.\n\n"
-                  "## Next action\nWaiting on clarification from the user.\n")
+                  "## Next action\nWaiting on clarification from the user.\n\n"
+                  "## Stop reason\n**needs_clarification**\n")
         emit({"type": "assistant", "message": {"content": [
             {"type": "tool_use", "name": "Write", "input": {"file_path": f"projects/{project_id}/runs/{run_id}/run.md"}}]}})
         time.sleep(0.05)
         emit({"type": "result", "subtype": "success", "is_error": False,
               "result": "Stopped for clarification before writing a report.", "session_id": session_id})
+        return 0
+
+    if scenario == "inaccessible_evidence":
+        if project_id:
+            write(f"projects/{project_id}/runs/{run_id}/run.md",
+                  "# Run: run-fake-1\n\n## Phase\ngathering -> blocked\n\n"
+                  "## Verification coverage and stop reason\n"
+                  "stop reason: inaccessible_evidence.\n")
+            write(f"projects/{project_id}/reports/{run_id}.md",
+                  "# Blocked report\n\nNo evidence could be retrieved and no answer is provided.\n\n"
+                  "**Stop reason: `inaccessible_evidence`.**\n\n## Sources\n")
+        emit({"type": "result", "subtype": "success", "is_error": False,
+              "result": "Research blocked because evidence was inaccessible.",
+              "session_id": session_id})
         return 0
 
     if scenario == "citation_fail":
@@ -161,7 +176,8 @@ def main():
     if project_id:
         if resumed:
             write(f"projects/{project_id}/runs/{run_id}/run.md",
-                  "# Run: run-fake-1\n\n## Phase\nsynthesis -> complete (resumed)\n")
+                  "# Run: run-fake-1\n\n## Phase\nsynthesis -> complete (resumed)\n\n"
+                  "## Stop reason\n**supported_within_scope**\n")
         else:
             write(f"projects/{project_id}/runs/{run_id}/run.md",
                   "# Run: run-fake-1\n\n## Question\nTest question.\n\n"
