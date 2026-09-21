@@ -41,3 +41,5 @@ Desktop.ini
 *~
 .idea/
 .vscode/
+   # Evaluation harness working output
+   evals/work/
