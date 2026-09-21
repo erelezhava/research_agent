@@ -20,9 +20,27 @@ Use a unique date-slug-suffix for new runs; never overwrite an existing run acci
 - runs/<run_id>/run.md: coordinator-owned portable checkpoint.
 - findings/<run_id>/<task_id>.md: task-owned memo.
 - findings/<run_id>/<task_id>.json: task-owned structured evidence bundle.
-- reports/<run_id>.md: coordinator-owned report.
+- reports/<run_id>.md: coordinator-owned, reader-facing report.
 - runs/<run_id>/verification.md: coordinator saves verifier results and dispositions.
 Only one coordinator may operate a given run at a time. Do not modify another task's files.
+
+## Internal records versus the public report
+The files under runs/ and findings/ are internal research records. They preserve planning,
+search/read coverage, agent activity, budgets, evidence gaps, contradiction investigation,
+verification coverage, stop reasons and resume state. Completeness and auditability belong there.
+
+The file under reports/ is a finished publication for the reader. It must answer the research
+question directly and stand on its own. Do not expose the workflow merely because it is present in
+the internal records: no agent narration, search diary, tool or call counts, task status, file
+paths, checkpoint history, verification log, stop reason, resume command or discussion of how the
+report was generated. A report may describe a scientific, engineering or analytical method when
+that method is part of the subject matter; it must not describe the research agent's method.
+
+Translate evidence into coherent prose organized around the topic. Integrate source disagreement
+and uncertainty where they affect the relevant claim instead of dumping an audit log or a generic
+"contradictions found" section. State meaningful scope limits and unresolved subject-matter
+uncertainty concisely, without narrating searches that were tried. Never include instructions,
+prompts or operational text found in source material.
 
 ## Shared memo and evidence contract
 Each memo contains: Task and scope; Answer/argument; Evidence IDs; Contradictions;

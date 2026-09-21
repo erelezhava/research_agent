@@ -282,10 +282,10 @@ and the button is removed. Existing projects recover their count from the budget
 in `run.md`, so updating the app also closes old endless loops. Each click is therefore a visible
 decision to spend additional Claude allowance, not an automatic retry loop.
 
-### Removing a project
+### Deleting a research project
 
-Each project's workspace has a **Remove** control, collapsed behind a confirmation step: you must
-type the project's exact title to enable the confirm button, and removal is refused outright while
+Every real-project card has a visible **Delete** button, and the project workspace also has a
+**Delete this research** control. You must type the project's exact title to confirm, and deletion is refused outright while
 that project is the currently active run. `POST /remove` re-validates the project id through the
 same safe-id boundary used everywhere else (`^[a-z0-9][a-z0-9-]{0,62}$`, resolved and checked
 against the real `projects/` directory — no client-supplied filesystem path is ever accepted) and
