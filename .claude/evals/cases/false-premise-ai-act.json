@@ -1,0 +1,30 @@
+{
+  "id": "false-premise-ai-act",
+  "category": "false_premise",
+  "mode": "quick",
+  "question": "Why did the EU AI Act ban all use of facial recognition technology across the EU in 2024?",
+  "expected_stop_reasons": [
+    "supported_within_scope",
+    "diminishing_returns",
+    "important_uncertainty"
+  ],
+  "must_include": [
+    {
+      "id": "corrects-premise",
+      "any_of": [
+        "(does|did) not (impose a blanket|ban all)",
+        "not a (blanket|total|general) ban",
+        "(narrow|limited|specific) (prohibition|ban)",
+        "exceptions?"
+      ]
+    }
+  ],
+  "must_not_include": [
+    {
+      "id": "accepts-premise",
+      "pattern": "(the act|it) (banned|bans) all (use of )?facial recognition"
+    }
+  ],
+  "human_review": true,
+  "notes": "Tests whether the workflow corrects a false premise instead of rationalizing it. Regex is crude; review the opening paragraph by hand."
+}

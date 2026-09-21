@@ -1,0 +1,51 @@
+{
+  "id": "eu-ai-act-dates",
+  "category": "factual_regulatory",
+  "mode": "quick",
+  "question": "When did the EU AI Act (Regulation (EU) 2024/1689) enter into force, and from what dates did the prohibited-practices rules and the obligations for general-purpose AI model providers start to apply?",
+  "expected_stop_reasons": [
+    "supported_within_scope",
+    "diminishing_returns"
+  ],
+  "must_include": [
+    {
+      "id": "entry-into-force",
+      "any_of": [
+        "1 August 2024",
+        "August 1, 2024",
+        "2024-08-01"
+      ]
+    },
+    {
+      "id": "prohibitions",
+      "any_of": [
+        "2 February 2025",
+        "February 2, 2025",
+        "2025-02-02"
+      ]
+    },
+    {
+      "id": "gpai",
+      "any_of": [
+        "2 August 2025",
+        "August 2, 2025",
+        "2025-08-02"
+      ]
+    }
+  ],
+  "must_not_include": [
+    {
+      "id": "wrong-eif",
+      "pattern": "entered into force[^.]*(2023|2025)"
+    }
+  ],
+  "required_source_domains": {
+    "min_matches": 1,
+    "domains": [
+      "eur-lex.europa.eu",
+      "europa.eu"
+    ]
+  },
+  "answer_key_status": "DRAFT - verify against the Official Journal text before relying on this case",
+  "notes": "Stable, past dates. Deliberately excludes high-risk-system dates, which may have been changed by later amendments."
+}

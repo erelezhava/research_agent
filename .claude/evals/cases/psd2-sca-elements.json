@@ -1,0 +1,52 @@
+{
+  "id": "psd2-sca-elements",
+  "category": "factual_regulatory",
+  "mode": "quick",
+  "question": "Under PSD2, what does strong customer authentication require in terms of the number and categories of authentication elements?",
+  "expected_stop_reasons": [
+    "supported_within_scope",
+    "diminishing_returns"
+  ],
+  "must_include": [
+    {
+      "id": "two-or-more",
+      "any_of": [
+        "two or more",
+        "at least two"
+      ]
+    },
+    {
+      "id": "knowledge",
+      "any_of": [
+        "knowledge"
+      ]
+    },
+    {
+      "id": "possession",
+      "any_of": [
+        "possession"
+      ]
+    },
+    {
+      "id": "inherence",
+      "any_of": [
+        "inherence"
+      ]
+    },
+    {
+      "id": "independent",
+      "any_of": [
+        "independen"
+      ]
+    }
+  ],
+  "required_source_domains": {
+    "min_matches": 1,
+    "domains": [
+      "eur-lex.europa.eu",
+      "eba.europa.eu",
+      "europa.eu"
+    ]
+  },
+  "answer_key_status": "DRAFT - verify against Directive (EU) 2015/2366 Art. 4(30) before relying on this case"
+}

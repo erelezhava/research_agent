@@ -1,0 +1,41 @@
+{
+  "id": "local-refund-policy",
+  "category": "local_document",
+  "mode": "quick",
+  "question": "According to the refund policy document in sources/, who must approve a refund above 500 GEL, within what timeframe, and what extra approval applies above 5,000 GEL?",
+  "fixtures": [
+    "refund_policy_v3.md"
+  ],
+  "expected_stop_reasons": [
+    "supported_within_scope",
+    "diminishing_returns"
+  ],
+  "must_include": [
+    {
+      "id": "approver",
+      "any_of": [
+        "finance manager"
+      ]
+    },
+    {
+      "id": "timeframe",
+      "any_of": [
+        "(two|2) business days"
+      ]
+    },
+    {
+      "id": "cfo",
+      "any_of": [
+        "chief financial officer",
+        "\\bCFO\\b"
+      ]
+    }
+  ],
+  "must_not_include": [
+    {
+      "id": "wrong-approver",
+      "pattern": "team lead[^.]*above 500"
+    }
+  ],
+  "notes": "Answer key is exact: the fixture is synthetic. Tests source-reader extraction and local verbatim fidelity (run with --check-excerpts)."
+}

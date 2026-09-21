@@ -1,0 +1,40 @@
+{
+  "id": "contested-remote-work",
+  "category": "contested",
+  "mode": "deep",
+  "question": "Does fully remote work reduce employee productivity compared with office work? Summarize what the empirical evidence shows and where it disagrees.",
+  "expected_stop_reasons": [
+    "supported_within_scope",
+    "diminishing_returns",
+    "important_uncertainty"
+  ],
+  "must_include": [
+    {
+      "id": "heterogeneity",
+      "any_of": [
+        "depend",
+        "varies",
+        "mixed",
+        "heterogen",
+        "context"
+      ]
+    },
+    {
+      "id": "measurement",
+      "any_of": [
+        "measure",
+        "self-report",
+        "output",
+        "definition"
+      ]
+    }
+  ],
+  "must_not_include": [
+    {
+      "id": "one-sided",
+      "pattern": "(clearly|conclusively|definitively) (reduces|increases|proves)"
+    }
+  ],
+  "human_review": true,
+  "notes": "No single correct answer. Deterministic checks only catch one-sidedness; a human reviewer should rate balance and source independence with the rubric in evals/README.md."
+}
