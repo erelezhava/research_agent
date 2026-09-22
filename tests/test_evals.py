@@ -1,9 +1,12 @@
 """Synthetic tests for evals/harness.py; no live model requests, no network."""
+import contextlib
+import io
 import importlib.util
 import json
 from pathlib import Path
 import random
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -158,6 +161,44 @@ class HarnessTests(unittest.TestCase):
             case = harness.load_case(path)
             for fx in case.get("fixtures", []):
                 self.assertTrue((REPO_ROOT / "evals/fixtures" / fx).is_file(), fx)
+
+    def test_case_paths_and_mode_are_validated(self):
+        case_path = self.root / "case.json"
+        base = {"id": "safe-case", "mode": "quick", "question": "q"}
+        for update in (
+            {"id": "../../outside"},
+            {"fixtures": ["../../private.txt"]},
+            {"mode": "unlimited"},
+            {"mode": []},
+            {"expected_stop_reasons": "supported_within_scope"},
+        ):
+            case_path.write_text(json.dumps({**base, **update}))
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                harness.load_case(case_path)
+
+    def test_required_domain_uses_hostname_boundaries(self):
+        self.assertTrue(harness.source_matches_domain(
+            "https://eur-lex.europa.eu/legal-content/EN/TXT/", "eur-lex.europa.eu"))
+        self.assertTrue(harness.source_matches_domain(
+            "https://data.eur-lex.europa.eu/document", "eur-lex.europa.eu"))
+        self.assertFalse(harness.source_matches_domain(
+            "https://eur-lex.europa.eu.example.com/document", "eur-lex.europa.eu"))
+        self.assertFalse(harness.source_matches_domain(
+            "https://example.com/?source=eur-lex.europa.eu", "eur-lex.europa.eu"))
+
+    def test_summary_handles_failed_live_result(self):
+        result_dir = self.root / "results"
+        result_dir.mkdir()
+        (result_dir / "eval-result.json").write_text(json.dumps({
+            "case_id": "failed-case", "pass": False,
+            "error": "expected exactly one run", "repeat": 2,
+        }))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            rc = harness.cmd_summary(SimpleNamespace(dirs=[result_dir], write=None))
+        self.assertEqual(rc, 0)
+        self.assertIn("0/1 runs passed", output.getvalue())
+        self.assertIn("failed-case repeat 2: expected exactly one run", output.getvalue())
 
 
 if __name__ == "__main__":

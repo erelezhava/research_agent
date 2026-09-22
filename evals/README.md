@@ -15,7 +15,8 @@ decide, the case is flagged for human review instead of guessed.
 | 2. End-to-end runs | `live` | yes (Claude allowance) | Across a fixed case set, how often does the workflow pass, at what cost and budget? |
 | 3. Verifier fault injection | `faults --execute` | yes | When known defects are seeded into a report, what share does the verifier catch? |
 
-Layer 1 and the mutant generation in layer 3 are covered by `tests/test_evals.py` and run in CI:
+Layer 1 and the mutant generation in layer 3 are covered by `tests/test_evals.py` and included in
+the standard test suite:
 
     python3 -B -m unittest tests.test_evals -v
 
@@ -70,11 +71,11 @@ real defect.
 
 ```json
 {
-  "id": "unique-slug",
+  "id": "unique-lowercase-slug",
   "category": "local_document | security | factual_regulatory | false_premise | contested",
   "mode": "quick | deep",
   "question": "exact research question",
-  "fixtures": ["file in evals/fixtures copied into sources/"],
+  "fixtures": ["flat file name from evals/fixtures copied into sources/"],
   "expected_stop_reasons": ["supported_within_scope", "diminishing_returns"],
   "must_include": [{"id": "fact-id", "any_of": ["regex", "alt regex"], "cited": true}],
   "must_not_include": [{"id": "bad-claim", "pattern": "regex"}],

@@ -31,6 +31,7 @@ import uuid
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EVALS_DIR = REPO_ROOT / "evals"
@@ -49,6 +50,7 @@ STOP_REASONS = {"supported_within_scope", "diminishing_returns", "important_unce
                 "inaccessible_evidence", "budget_exhausted", "needs_clarification"}
 MODE_CEILINGS = {"quick": {"collection": 6, "verification": 3},
                  "deep": {"collection": 20, "verification": 12}}
+SAFE_CASE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
 
 # Phrases CLAUDE.md and report-writer.md forbid in the reader-facing report.
 # Kept narrow on purpose: a report *about* AI agents may legitimately say "agent".
@@ -109,6 +111,19 @@ def sources_map(sources_block):
         if m:
             out[m.group(1)] = (m.group(2), m.group(3).strip())
     return out
+
+
+def source_matches_domain(source, required_domain):
+    """Match an HTTP(S) source by hostname, not by a spoofable URL substring."""
+    try:
+        parsed = urlsplit(source)
+        host = (parsed.hostname or "").rstrip(".").lower()
+    except ValueError:
+        return False
+    domain = str(required_domain).rstrip(".").lower()
+    return parsed.scheme in ("http", "https") and bool(domain) and (
+        host == domain or host.endswith("." + domain)
+    )
 
 
 # Same accepted formats as server/runner.py::_extract_stop_reason; latest wins.
@@ -288,7 +303,7 @@ def score_run(root, run_id, case, log_path=None, check_excerpt_fidelity=False):
 
     domains = case.get("required_source_domains") or {}
     domain_hits = sorted({d for d in domains.get("domains", [])
-                          for _, url in cited.values() if d in url})
+                          for _, url in cited.values() if source_matches_domain(url, d)})
     stop_reason = extract_stop_reason(run_md)
 
     result = {
@@ -357,7 +372,8 @@ def make_workspace(case, dest):
     for d in ("runs", "findings", "reports", "sources"):
         (dest / d).mkdir(exist_ok=True)
     for fx in case.get("fixtures", []):
-        shutil.copy2(EVALS_DIR / "fixtures" / fx, dest / "sources" / Path(fx).name)
+        src = resolve_fixture(fx)
+        shutil.copy2(src, dest / "sources" / src.name)
     return dest
 
 
@@ -612,7 +628,7 @@ def cmd_summary(args):
     if not results:
         print("No eval-result.json files found.")
         return 1
-    rows, by_case = [], {}
+    by_case = {}
     for r in results:
         by_case.setdefault(r["case_id"], []).append(r)
     lines = ["| Case | Runs | Pass rate | Fact recall | Cited facts | Stop reason(s) | Collection calls | "
@@ -620,20 +636,31 @@ def cmd_summary(args):
              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     lower_bound = False
     for cid, rs in sorted(by_case.items()):
-        avg = lambda k: (lambda v: round(sum(v) / len(v), 2) if v else "–")([r[k] for r in rs if r.get(k) is not None])
+        def avg(key):
+            values = [r.get(key) for r in rs if isinstance(r.get(key), (int, float))]
+            return round(sum(values) / len(values), 2) if values else "–"
+
         usage = [r["usage"] for r in rs if "usage" in r]
-        lower_bound |= any(not u["subagent_events_seen"] for u in usage)
-        calls = "/".join(str(u["collection_calls"]) for u in usage) or "–"
-        cost = [u["cost_usd_reported"] for u in usage if u.get("cost_usd_reported") is not None]
+        lower_bound |= any(not u.get("subagent_events_seen", False) for u in usage)
+        calls = "/".join(str(u.get("collection_calls", "–")) for u in usage) or "–"
+        cost = [u["cost_usd_reported"] for u in usage if isinstance(u.get("cost_usd_reported"), (int, float))]
+        budget_results = [u.get("budget_ok") for u in usage if u.get("budget_ok") is not None]
         lines.append(" | ".join([
-            f"| {cid}", str(len(rs)), f"{sum(r['pass'] for r in rs)}/{len(rs)}", str(avg("fact_recall")),
+            f"| {cid}", str(len(rs)), f"{sum(bool(r.get('pass')) for r in rs)}/{len(rs)}", str(avg("fact_recall")),
             str(avg("cited_fact_rate")), ", ".join(sorted({str(r.get('stop_reason')) for r in rs})), calls,
-            f"{sum(u['budget_ok'] for u in usage)}/{len(usage)}" if usage else "–",
+            f"{sum(bool(value) for value in budget_results)}/{len(budget_results)}" if budget_results else "–",
             str(sum(bool(r.get("workflow_residue")) for r in rs)), str(avg("uncited_paragraph_rate")),
             f"${sum(cost):.2f}" if cost else "–",
             "yes" if any(r.get("needs_human_review") for r in rs) else "", ]) + " |")
-    total = sum(r["pass"] for r in results)
+    total = sum(bool(r.get("pass")) for r in results)
     lines += ["", f"Overall: {total}/{len(results)} runs passed all gates."]
+    errors = [(r.get("case_id", "unknown"), r.get("repeat"), r.get("error"))
+              for r in results if r.get("error")]
+    if errors:
+        lines += ["", "Failed run errors:"]
+        for case_id, repeat, error in errors:
+            suffix = f" repeat {repeat}" if repeat is not None else ""
+            lines.append(f"- {case_id}{suffix}: {error}")
     if lower_bound:
         lines.append("Note: some logs contained no subagent events, so collection counts are lower bounds.")
     text = "\n".join(lines)
@@ -645,12 +672,39 @@ def cmd_summary(args):
 
 # ---------------------------------------------------------------- cli
 
+def resolve_fixture(name):
+    """Resolve one flat fixture name and enforce containment in evals/fixtures."""
+    if not isinstance(name, str) or not name or Path(name).name != name:
+        raise ValueError(f"unsafe fixture name {name!r}: use a file name without directories")
+    fixture_root = (EVALS_DIR / "fixtures").resolve()
+    candidate = (fixture_root / name).resolve()
+    if candidate.parent != fixture_root or not candidate.is_file():
+        raise ValueError(f"fixture is missing or outside evals/fixtures: {name!r}")
+    return candidate
+
+
 def load_case(path):
     case = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(case, dict):
+        raise ValueError(f"{path}: case must be a JSON object")
     for key in ("id", "question", "mode"):
         if key not in case:
             raise ValueError(f"{path}: case missing '{key}'")
-    unknown = set(case.get("expected_stop_reasons", [])) - STOP_REASONS
+    if not isinstance(case["id"], str) or not SAFE_CASE_ID.fullmatch(case["id"]):
+        raise ValueError(f"{path}: unsafe case id {case['id']!r}")
+    if not isinstance(case["question"], str) or not case["question"].strip():
+        raise ValueError(f"{path}: question must be a non-empty string")
+    if not isinstance(case["mode"], str) or case["mode"] not in MODE_CEILINGS:
+        raise ValueError(f"{path}: mode must be 'quick' or 'deep'")
+    fixtures = case.get("fixtures", [])
+    if not isinstance(fixtures, list):
+        raise ValueError(f"{path}: fixtures must be a list")
+    for fixture in fixtures:
+        resolve_fixture(fixture)
+    expected_reasons = case.get("expected_stop_reasons", [])
+    if not isinstance(expected_reasons, list) or not all(isinstance(value, str) for value in expected_reasons):
+        raise ValueError(f"{path}: expected_stop_reasons must be a list of strings")
+    unknown = set(expected_reasons) - STOP_REASONS
     if unknown:
         raise ValueError(f"{path}: unknown stop reasons {unknown}")
     return case
