@@ -127,6 +127,32 @@
       .replace(/"/g, "&quot;");
   }
   function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+  function formatCount(value) {
+    return (typeof value === "number" && isFinite(value))
+      ? Math.round(value).toLocaleString("en-US") : "Unavailable";
+  }
+  function usageCardHtml(usage) {
+    if (!usage || !usage.totals) return "";
+    var t = usage.totals;
+    var handoffs = usage.handoffs || {};
+    var edits = 0;
+    Object.keys(usage.toolCallsByRole || {}).forEach(function (role) {
+      var calls = usage.toolCallsByRole[role] || {};
+      if (typeof calls.Edit === "number") edits += calls.Edit;
+    });
+    var cost = typeof t.costUsd === "number" ? " · CLI list-cost value: $" + t.costUsd.toFixed(2) : "";
+    return '<div class="card"><h2 style="margin-top:0">Usage snapshot</h2>' +
+      '<p class="small muted">Reported by Claude Code for this saved session. Cached input is shown separately because it is the clearest signal of repeated context.</p>' +
+      '<div class="summary-grid">' +
+      '<div><strong>' + formatCount(t.inputTokens) + '</strong><span>Input tokens</span></div>' +
+      '<div><strong>' + formatCount(t.cacheCreationInputTokens) + '</strong><span>Cache creation</span></div>' +
+      '<div><strong>' + formatCount(t.cacheReadInputTokens) + '</strong><span>Cached input read</span></div>' +
+      '<div><strong>' + formatCount(t.outputTokens) + '</strong><span>Output tokens</span></div>' +
+      '</div><p class="small muted" style="margin-bottom:0">Agent handoffs: ' +
+      formatCount(handoffs.count) + ' · Handoff prompt characters: ' +
+      formatCount(handoffs.promptCharacters) + ' · File edits: ' + formatCount(edits) +
+      cost + '</p></div>';
+  }
   function today() {
     var d = new Date();
     function p(n) { return (n < 10 ? "0" : "") + n; }
@@ -2167,6 +2193,9 @@
         });
       }
     }
+
+    var usageHtml = usageCardHtml(p.usage);
+    if (usageHtml) right.appendChild(el(usageHtml));
 
     var card = el('<div class="card">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +

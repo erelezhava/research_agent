@@ -330,6 +330,195 @@ def build_argv(claude_bin, prompt, session_id, model=DEFAULT_MODEL, resume=False
     return argv
 
 
+_TOKEN_FIELDS = (
+    ("inputTokens", "input_tokens"),
+    ("outputTokens", "output_tokens"),
+    ("cacheReadInputTokens", "cache_read_input_tokens"),
+    ("cacheCreationInputTokens", "cache_creation_input_tokens"),
+    ("thinkingTokens", "thinking_tokens"),
+)
+
+
+def _usage_numbers(raw, camel_case=False):
+    """Return only numeric usage fields from an untrusted CLI event."""
+    raw = raw if isinstance(raw, dict) else {}
+    out = {}
+    for public, snake in _TOKEN_FIELDS:
+        key = public if camel_case else snake
+        value = raw.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            out[public] = value
+    return out
+
+
+def _add_usage(target, values):
+    for key, value in values.items():
+        target[key] = target.get(key, 0) + value
+
+
+def summarize_session_log(log_path):
+    """Extract cost attribution data from one append-only Claude stream log.
+
+    `modelUsage` on the largest result event is the CLI's exact session-wide
+    total. Per-role input context is separately labelled *observed*: the
+    verbose stream exposes message input/cache fields, but not reliable output
+    totals or a phase identifier for every request. Handoff sizes and completed
+    foreground-agent usage are exact for the events that expose them.
+    """
+    path = Path(log_path)
+    if not path.is_file():
+        return None
+
+    task_roles = {}
+    handoffs = {}
+    completed_agents = {}
+    observed_by_role = {}
+    tool_calls_by_role = {}
+    seen_messages = set()
+    seen_tool_calls = set()
+    best_result = None
+    best_score = -1
+
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+
+    for raw in lines:
+        try:
+            event = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+
+        if event.get("type") == "assistant":
+            message = event.get("message") if isinstance(event.get("message"), dict) else {}
+            blocks = message.get("content") if isinstance(message.get("content"), list) else []
+            for block in blocks:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                tool_id = block.get("id")
+                if tool_id not in seen_tool_calls:
+                    seen_tool_calls.add(tool_id)
+                    parent = event.get("parent_tool_use_id")
+                    caller_role = task_roles.get(parent, "coordinator") if parent else "coordinator"
+                    calls = tool_calls_by_role.setdefault(caller_role, {})
+                    tool_name = block.get("name") or "unknown"
+                    calls[tool_name] = calls.get(tool_name, 0) + 1
+                if block.get("name") not in ("Task", "Agent"):
+                    continue
+                tool_input = block.get("input") if isinstance(block.get("input"), dict) else {}
+                role = tool_input.get("subagent_type") or "unknown-subagent"
+                if isinstance(tool_id, str):
+                    task_roles[tool_id] = role
+                if tool_id not in handoffs:
+                    prompt = tool_input.get("prompt")
+                    handoffs[tool_id] = {
+                        "role": role,
+                        "promptCharacters": len(prompt) if isinstance(prompt, str) else 0,
+                    }
+
+            message_id = message.get("id") or event.get("request_id")
+            parent = event.get("parent_tool_use_id")
+            message_key = (parent, message_id)
+            if message_id and message_key not in seen_messages:
+                seen_messages.add(message_key)
+                role = task_roles.get(parent, "coordinator") if parent else "coordinator"
+                bucket = observed_by_role.setdefault(role, {"requestCount": 0})
+                bucket["requestCount"] += 1
+                observed = _usage_numbers(message.get("usage"))
+                # Claude's verbose assistant events expose useful request-level
+                # input/cache figures, but their output_tokens values describe
+                # streamed blocks rather than trustworthy per-request totals.
+                observed.pop("outputTokens", None)
+                observed.pop("thinkingTokens", None)
+                _add_usage(bucket, observed)
+
+        if event.get("type") == "user":
+            message = event.get("message") if isinstance(event.get("message"), dict) else {}
+            blocks = message.get("content") if isinstance(message.get("content"), list) else []
+            tool_result = event.get("tool_use_result")
+            if not isinstance(tool_result, dict) or tool_result.get("status") != "completed":
+                continue
+            tool_use_id = next((b.get("tool_use_id") for b in blocks
+                                if isinstance(b, dict) and b.get("type") == "tool_result"), None)
+            role = tool_result.get("agentType") or task_roles.get(tool_use_id)
+            if not isinstance(role, str):
+                continue
+            bucket = completed_agents.setdefault(role, {"count": 0, "toolCalls": 0})
+            bucket["count"] += 1
+            tool_calls = tool_result.get("totalToolUseCount")
+            if isinstance(tool_calls, int) and not isinstance(tool_calls, bool):
+                bucket["toolCalls"] += tool_calls
+            _add_usage(bucket, _usage_numbers(tool_result.get("usage")))
+
+        if event.get("type") == "result":
+            model_usage = event.get("modelUsage") if isinstance(event.get("modelUsage"), dict) else {}
+            score = 0
+            for values in model_usage.values():
+                score += sum(_usage_numbers(values, camel_case=True).values())
+            if not score:
+                score = sum(_usage_numbers(event.get("usage")).values())
+            if score > best_score:
+                best_result, best_score = event, score
+
+    by_role = {}
+    for item in handoffs.values():
+        role = item["role"]
+        bucket = by_role.setdefault(role, {"count": 0, "promptCharacters": 0})
+        bucket["count"] += 1
+        bucket["promptCharacters"] += item["promptCharacters"]
+
+    summary = {
+        "source": "claude-stream-json",
+        "handoffs": {
+            "count": len(handoffs),
+            "promptCharacters": sum(x["promptCharacters"] for x in handoffs.values()),
+            "byRole": by_role,
+        },
+        "observedInputByRole": observed_by_role,
+        "toolCallsByRole": tool_calls_by_role,
+        "completedAgentUsage": completed_agents,
+        "attributionNote": (
+            "Overall/model totals are reported by Claude Code. Per-role values are observed "
+            "message input/cache usage; the stream does not expose reliable output-token or "
+            "phase totals for every agent."
+        ),
+    }
+
+    if isinstance(best_result, dict):
+        models = {}
+        totals = {}
+        for model, raw_values in (best_result.get("modelUsage") or {}).items():
+            if not isinstance(model, str) or not isinstance(raw_values, dict):
+                continue
+            values = _usage_numbers(raw_values, camel_case=True)
+            cost = raw_values.get("costUSD")
+            if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+                values["costUsd"] = cost
+            web_searches = raw_values.get("webSearchRequests")
+            if isinstance(web_searches, int) and not isinstance(web_searches, bool):
+                values["webSearchRequests"] = web_searches
+            models[model] = values
+            _add_usage(totals, {k: v for k, v in values.items() if k != "costUsd"})
+        if models:
+            totals["costUsd"] = sum(v.get("costUsd", 0) for v in models.values())
+            summary["models"] = models
+            summary["totals"] = totals
+        else:
+            totals = _usage_numbers(best_result.get("usage"))
+            cost = best_result.get("total_cost_usd")
+            if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+                totals["costUsd"] = cost
+            if totals:
+                summary["totals"] = totals
+        stats = best_result.get("subagent_stats")
+        if isinstance(stats, dict):
+            summary["subagents"] = stats
+
+    has_data = bool(summary.get("totals") or handoffs or observed_by_role or completed_agents)
+    return summary if has_data else None
+
+
 # ---- active-run tracking ---------------------------------------------------
 
 class _RunHandle:
@@ -605,6 +794,7 @@ class Runner:
             if kind == "start":
                 state["budgetContinuations"] = 0
                 state["maxBudgetContinuations"] = MAX_BUDGET_CONTINUATIONS
+                state["usage"] = None
             elif kind == "continue-budget":
                 state["budgetContinuations"] = existing_count + 1
                 state["maxBudgetContinuations"] = MAX_BUDGET_CONTINUATIONS
@@ -721,15 +911,19 @@ class Runner:
             with self._lock:
                 handle = self._active.get(project_id)
                 user_stopped = bool(handle and handle.user_stopped)
-            self._finalize(project_id, saw_result, proc.returncode, user_stopped=user_stopped)
+            self._finalize(project_id, saw_result, proc.returncode, user_stopped=user_stopped,
+                           log_path=log_path)
             with self._lock:
                 self._active.pop(project_id, None)
                 self._release(project_id)
 
-    def _finalize(self, project_id, result_event, returncode, user_stopped=False):
+    def _finalize(self, project_id, result_event, returncode, user_stopped=False, log_path=None):
         pdir = self.store.project_dir(project_id)
         state = self.store.read_run_state(project_id)
         state["pid"] = None
+        usage = summarize_session_log(log_path) if log_path else None
+        if usage:
+            state["usage"] = usage
 
         if user_stopped:
             # A deliberate Stop always wins over whatever the process's own

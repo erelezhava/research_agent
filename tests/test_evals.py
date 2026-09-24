@@ -106,8 +106,8 @@ class HarnessTests(unittest.TestCase):
     def test_stream_log_attributes_calls_to_roles(self):
         events = [
             {"type": "assistant", "message": {"content": [
-                {"type": "tool_use", "id": "task1", "name": "Task", "input": {"subagent_type": "web-researcher"}},
-                {"type": "tool_use", "id": "task2", "name": "Task", "input": {"subagent_type": "verifier"}}]}},
+                {"type": "tool_use", "id": "task1", "name": "Task", "input": {"subagent_type": "web-researcher", "prompt": "abc"}},
+                {"type": "tool_use", "id": "task2", "name": "Task", "input": {"subagent_type": "verifier", "prompt": "defgh"}}]}},
             {"type": "assistant", "parent_tool_use_id": "task1", "message": {"content": [
                 {"type": "tool_use", "id": "a", "name": "WebSearch", "input": {}},
                 {"type": "tool_use", "id": "b", "name": "WebFetch", "input": {}}]}},
@@ -116,7 +116,10 @@ class HarnessTests(unittest.TestCase):
             {"type": "assistant", "message": {"content": [
                 {"type": "tool_use", "id": "d", "name": "Read", "input": {"file_path": "/x/sources/policy.md"}},
                 {"type": "tool_use", "id": "e", "name": "Read", "input": {"file_path": "/x/runs/r1/run.md"}}]}},
-            {"type": "result", "total_cost_usd": 0.42, "duration_ms": 1000, "num_turns": 5, "is_error": False},
+            {"type": "result", "total_cost_usd": 0.42, "duration_ms": 1000, "num_turns": 5,
+             "is_error": False, "modelUsage": {"claude-test": {
+                 "inputTokens": 2, "outputTokens": 30, "cacheReadInputTokens": 40,
+                 "cacheCreationInputTokens": 50, "thinkingTokens": 6}}},
         ]
         log = self.root / "log.jsonl"
         log.write_text("\n".join(json.dumps(e) for e in events))
@@ -124,6 +127,9 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(u["collection_calls"], 3)   # 2 web-researcher + 1 source read by coordinator
         self.assertEqual(u["verification_calls"], 1)
         self.assertTrue(u["subagent_events_seen"])
+        self.assertEqual(u["handoff_count"], 2)
+        self.assertEqual(u["handoff_prompt_characters"], 8)
+        self.assertEqual(u["cache_read_input_tokens"], 40)
         r = harness.score_run(self.root, "r1", dict(CASE, max_collection_calls=2), log_path=log)
         self.assertFalse(r["gates"]["budget"])
 

@@ -509,6 +509,16 @@ textarea.approach-prompt { width: 100%; font: inherit; line-height: 1.5; }
 .small { font-size: 0.85rem; }
 .tag { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); font-weight: 700; }
 
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+.summary-grid > div { padding: 10px 12px; background: var(--surface-2); border-radius: 8px; }
+.summary-grid strong { display: block; font-size: 1.05rem; }
+.summary-grid span { display: block; margin-top: 2px; color: var(--text-muted); font-size: 0.78rem; }
+
 /* File list */
 .filelist { list-style: none; padding: 0; margin: 10px 0 0; }
 .filelist li { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-radius: 8px; margin-bottom: 6px; font-size: 0.9rem; }

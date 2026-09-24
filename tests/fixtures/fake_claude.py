@@ -215,7 +215,13 @@ def main():
         {"type": "tool_use", "name": "Write", "input": {"file_path": f"projects/{project_id}/reports/{run_id}.md"}}]}})
     time.sleep(0.05)
     emit({"type": "result", "subtype": "success", "is_error": False,
-          "result": "Report complete.", "session_id": session_id})
+          "result": "Report complete.", "session_id": session_id,
+          "modelUsage": {"claude-test": {
+              "inputTokens": 10, "outputTokens": 20,
+              "cacheReadInputTokens": 30, "cacheCreationInputTokens": 40,
+              "thinkingTokens": 5, "webSearchRequests": 0, "costUSD": 0.01,
+          }},
+          "subagent_stats": {"spawned": 1, "by_type": {"web-researcher": 1}}})
     return 0
 
 

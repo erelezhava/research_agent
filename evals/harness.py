@@ -147,7 +147,7 @@ def find_run_id(root):
 # ---------------------------------------------------------------- stream-json log parsing
 
 def parse_stream_log(path):
-    """Count tool calls from a `claude -p --output-format stream-json --verbose` log.
+    """Count calls and capture CLI-reported token usage from a stream log.
 
     Calls made inside a subagent carry parent_tool_use_id pointing at the Task
     call that launched it, so each call can be attributed to a role. If the
@@ -155,13 +155,30 @@ def parse_stream_log(path):
     `subagent_events_seen` stays False so the summary can say so.
     """
     task_role, calls, result = {}, [], {}
+    best_result_score = -1
+    handoff_prompt_characters = 0
     for raw in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             ev = json.loads(raw)
         except ValueError:
             continue
         if ev.get("type") == "result":
-            result = ev
+            model_usage = ev.get("modelUsage") if isinstance(ev.get("modelUsage"), dict) else {}
+            score = sum(
+                sum(v.get(k, 0) for k in ("inputTokens", "outputTokens",
+                                           "cacheReadInputTokens", "cacheCreationInputTokens")
+                    if isinstance(v.get(k), (int, float)) and not isinstance(v.get(k), bool))
+                for v in model_usage.values() if isinstance(v, dict)
+            )
+            if not score:
+                usage = ev.get("usage") if isinstance(ev.get("usage"), dict) else {}
+                score = sum(usage.get(k, 0) for k in ("input_tokens", "output_tokens",
+                                                       "cache_read_input_tokens",
+                                                       "cache_creation_input_tokens")
+                            if isinstance(usage.get(k), (int, float)) and
+                            not isinstance(usage.get(k), bool))
+            if score > best_result_score:
+                result, best_result_score = ev, score
         if ev.get("type") != "assistant":
             continue
         parent = ev.get("parent_tool_use_id")
@@ -171,6 +188,9 @@ def parse_stream_log(path):
             name, inp = block.get("name"), block.get("input") or {}
             if name in ("Task", "Agent"):
                 task_role[block.get("id")] = inp.get("subagent_type") or "unknown-subagent"
+                prompt = inp.get("prompt")
+                if isinstance(prompt, str):
+                    handoff_prompt_characters += len(prompt)
             calls.append({"name": name, "parent": parent, "input": inp})
     by_role, collection, verification = {}, 0, 0
     for c in calls:
@@ -185,11 +205,36 @@ def parse_stream_log(path):
             verification += 1
         else:
             collection += 1
+    models = result.get("modelUsage") if isinstance(result.get("modelUsage"), dict) else {}
+    exact = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
+             "cache_creation_input_tokens": 0, "thinking_tokens": 0}
+    model_fields = {"input_tokens": "inputTokens", "output_tokens": "outputTokens",
+                    "cache_read_input_tokens": "cacheReadInputTokens",
+                    "cache_creation_input_tokens": "cacheCreationInputTokens",
+                    "thinking_tokens": "thinkingTokens"}
+    if models:
+        for values in models.values():
+            if not isinstance(values, dict):
+                continue
+            for public, cli_key in model_fields.items():
+                value = values.get(cli_key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    exact[public] += value
+    else:
+        usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+        for public in exact:
+            value = usage.get(public)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                exact[public] = value
+
     return {
         "tool_calls_by_role": by_role,
         "collection_calls": collection,
         "verification_calls": verification,
         "subagent_events_seen": any(c["parent"] for c in calls),
+        "handoff_count": sum(1 for c in calls if c["name"] in ("Task", "Agent")),
+        "handoff_prompt_characters": handoff_prompt_characters,
+        **exact,
         "cost_usd_reported": result.get("total_cost_usd"),
         "duration_ms": result.get("duration_ms"),
         "num_turns": result.get("num_turns"),
@@ -632,8 +677,8 @@ def cmd_summary(args):
     for r in results:
         by_case.setdefault(r["case_id"], []).append(r)
     lines = ["| Case | Runs | Pass rate | Fact recall | Cited facts | Stop reason(s) | Collection calls | "
-             "Budget ok | Residue | Uncited ¶ | Cost (reported) | Review |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "Budget ok | Cached input | Output | Handoffs | Residue | Uncited ¶ | Cost (reported) | Review |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     lower_bound = False
     for cid, rs in sorted(by_case.items()):
         def avg(key):
@@ -645,10 +690,14 @@ def cmd_summary(args):
         calls = "/".join(str(u.get("collection_calls", "–")) for u in usage) or "–"
         cost = [u["cost_usd_reported"] for u in usage if isinstance(u.get("cost_usd_reported"), (int, float))]
         budget_results = [u.get("budget_ok") for u in usage if u.get("budget_ok") is not None]
+        cached = "/".join(str(u.get("cache_read_input_tokens", "–")) for u in usage) or "–"
+        output = "/".join(str(u.get("output_tokens", "–")) for u in usage) or "–"
+        handoffs = "/".join(str(u.get("handoff_count", "–")) for u in usage) or "–"
         lines.append(" | ".join([
             f"| {cid}", str(len(rs)), f"{sum(bool(r.get('pass')) for r in rs)}/{len(rs)}", str(avg("fact_recall")),
             str(avg("cited_fact_rate")), ", ".join(sorted({str(r.get('stop_reason')) for r in rs})), calls,
             f"{sum(bool(value) for value in budget_results)}/{len(budget_results)}" if budget_results else "–",
+            cached, output, handoffs,
             str(sum(bool(r.get("workflow_residue")) for r in rs)), str(avg("uncited_paragraph_rate")),
             f"${sum(cost):.2f}" if cost else "–",
             "yes" if any(r.get("needs_human_review") for r in rs) else "", ]) + " |")

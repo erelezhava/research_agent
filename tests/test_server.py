@@ -24,6 +24,49 @@ from server import runner as runnermod    # noqa: E402
 FAKE_CLAUDE = REPO_ROOT / "tests" / "fixtures" / "fake_claude.py"
 
 
+class UsageSummaryTests(unittest.TestCase):
+    def test_session_usage_tracks_exact_totals_and_bounded_handoffs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "session.log"
+            events = [
+                {"type": "assistant", "message": {"id": "m1", "usage": {
+                    "input_tokens": 2, "cache_creation_input_tokens": 100,
+                    "cache_read_input_tokens": 200, "output_tokens": 5,
+                }, "content": [{"type": "tool_use", "id": "agent-1", "name": "Agent",
+                                "input": {"subagent_type": "report-writer", "prompt": "abc"}}]}},
+                # Same streamed message id: input/cache usage must not be counted twice.
+                {"type": "assistant", "message": {"id": "m1", "usage": {
+                    "input_tokens": 2, "cache_creation_input_tokens": 100,
+                    "cache_read_input_tokens": 200, "output_tokens": 5,
+                }, "content": [{"type": "text", "text": "working"}]}},
+                {"type": "assistant", "parent_tool_use_id": "agent-1", "message": {
+                    "id": "m2", "usage": {"input_tokens": 1,
+                    "cache_creation_input_tokens": 20, "cache_read_input_tokens": 30,
+                    "output_tokens": 4}, "content": []}},
+                {"type": "user", "message": {"content": [{"type": "tool_result",
+                    "tool_use_id": "agent-1", "content": "done"}]}, "tool_use_result": {
+                    "status": "completed", "agentType": "report-writer", "totalToolUseCount": 2,
+                    "usage": {"input_tokens": 1, "cache_creation_input_tokens": 20,
+                              "cache_read_input_tokens": 30, "output_tokens": 40}}},
+                {"type": "result", "total_cost_usd": 0.25, "modelUsage": {
+                    "claude-test": {"inputTokens": 3, "outputTokens": 44,
+                                    "cacheReadInputTokens": 230,
+                                    "cacheCreationInputTokens": 120,
+                                    "thinkingTokens": 7, "webSearchRequests": 1,
+                                    "costUSD": 0.25}},
+                    "subagent_stats": {"spawned": 1, "by_type": {"report-writer": 1}}},
+            ]
+            log.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
+            usage = runnermod.summarize_session_log(log)
+            self.assertEqual(usage["totals"]["cacheReadInputTokens"], 230)
+            self.assertEqual(usage["totals"]["outputTokens"], 44)
+            self.assertEqual(usage["handoffs"]["count"], 1)
+            self.assertEqual(usage["handoffs"]["promptCharacters"], 3)
+            self.assertEqual(usage["observedInputByRole"]["coordinator"]["requestCount"], 1)
+            self.assertEqual(usage["toolCallsByRole"]["coordinator"]["Agent"], 1)
+            self.assertEqual(usage["completedAgentUsage"]["report-writer"]["outputTokens"], 40)
+
+
 def make_repo(tmpdir):
     """Build a minimal repo root: just what runner.py's prompt references
     (CLAUDE.md, .claude/commands/research.md, scripts/check_citations.py)
@@ -232,6 +275,8 @@ class OutcomeTests(ServerTestCase):
         self.assertIn("Fake report", final["reportMarkdown"] or "")
         self.assertIsNotNone(final.get("citationCheck"))
         self.assertTrue(final["citationCheck"]["ok"], final["citationCheck"])
+        self.assertEqual(final["usage"]["totals"]["cacheReadInputTokens"], 30)
+        self.assertEqual(final["usage"]["handoffs"]["count"], 1)
 
     def test_cli_failure_produces_failed_state(self):
         self.set_env("FAKE_CLAUDE_SCENARIO", "failure")

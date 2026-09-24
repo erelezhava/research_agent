@@ -35,8 +35,8 @@ Open this project in Claude Code and run:
 
 Supply scope, timeframe and desired depth when useful. The coordinator saves the run ID early.
 Add `mode: quick |` or `mode: deep |` before the question to pick a ceiling explicitly (e.g.
-`/research mode: quick | <question>`); with no prefix, the default is deep — the original,
-unprefixed behavior, unchanged. Quick mode is deliberately lighter (see Method and budget below)
+`/research mode: deep | <question>`); with no prefix, the default is Quick. Quick mode is
+deliberately lighter (see Method and budget below)
 and, when insufficient, the coordinator will say so outside the public report and suggest deep
 mode rather than silently exceeding its own ceilings.
 Sources may be plain text, CSV, JSON or PDF. This worker configuration has no Office conversion
@@ -88,7 +88,12 @@ time, one follow-up round, and a proportionately concise report (no exhaustive b
 comparing every individual product variant). These are prompt-level ceilings, not target spending
 or account quota guarantees. Exhausted budgets produce a checkpoint or qualified result, not an
 assertion of completeness; quick mode that turns out to need more says so and suggests deep mode
-rather than silently exceeding its own ceiling. Operational details stay in `run.md` and the final
+instead of silently exceeding its own ceiling. Quick mode is written directly by the coordinator;
+it uses a separate verifier only for consequential, contradictory, weakly supported, or fragile
+claims. Deep mode retains a separate report writer and verifier. Both modes use bounded handoff
+packets rather than sending every memo to downstream agents, stop collection when further evidence
+is unlikely to change the answer, and batch report revisions to avoid repeatedly loading a large
+file after small edits. Operational details stay in `run.md` and the final
 status message, not the reader-facing report. Workers use Sonnet. In a terminal `/research`
 session the coordinator uses whatever model your interactive session is running; in a
 browser-started project the coordinator model is a fixed, explicitly-configured value (Sonnet by
@@ -103,6 +108,14 @@ After that it becomes **Completed — known limitations** instead of offering an
 report preserves only substantive uncertainty that affects its conclusions; budget and continuation
 details remain in project status and `run.md`. Another project can be started if a different scope
 or new source material warrants more work.
+
+Completed browser projects also show the Claude CLI's reported input, output, cache-creation and
+cache-read tokens, list-cost value, agent-handoff count, total handoff-prompt size and file-edit
+count. The evaluation
+summary records the same token categories so Quick and Deep runs can be compared on cost as well as
+fact recall, citation coverage and conclusion quality. Per-role context attribution is retained in
+`state/run.json`; the CLI does not currently expose reliable output-token or phase totals for every
+individual agent, so those unavailable breakdowns are not guessed.
 
 ## Evidence and validation
 CLAUDE.md defines schema version 2. Each task has a readable memo plus structured JSON with

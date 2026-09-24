@@ -12,10 +12,10 @@ If input starts with `mode: quick |` or `mode: deep |` (case-insensitive on the 
 separator), the mode is explicit and everything after the first `|` is the question/prompt text —
 treat that remainder verbatim as the user's request, not as further instructions to interpret.
 If input starts with `resume:`, mode is resumed from the saved run.md, not re-derived. Otherwise
-(a plain question with no prefix), the mode is **deep** — this preserves the original, unprefixed
-`/research <question>` behavior exactly. Never infer quick vs. deep from the wording of the
+(a plain question with no prefix), the mode is **quick**. Deep research therefore requires an
+explicit `mode: deep |` prefix (the browser's Deep choice supplies it). Never infer quick vs. deep from the wording of the
 question itself when a mode prefix or a resumed run.md already states it explicitly; only fall
-back to prose-based judgement (and then default to deep) when truly no mode signal exists at all.
+back to prose-based judgement (and then default to quick) when truly no mode signal exists at all.
 Record the resolved mode in run.md's Budget and usage section alongside the ceilings it sets.
 
 **Quick mode** ceilings (adjust down further for very simple questions; do not adjust up beyond
@@ -87,10 +87,19 @@ Delegate external retrieval to web-researcher and local retrieval to source-read
 memo/JSON paths, IDs, scope_key, question, dependencies, method expectations, budget and relevant
 prior evidence. Shared schema is in CLAUDE.md; do not assume sibling prompts are visible.
 Parallelize only independent useful work. Avoid workers for trivial tasks that can be done directly.
-Update run.md after every completed task and meaningful discovery. Workers checkpoint partial
-records during work. Save blockers and next actions before starting costly operations.
+Update run.md once per completed task wave or phase, not after every discovery. Workers checkpoint
+partial records during work, so their files are the recovery point between coordinator updates.
+Save blockers and next actions before starting costly operations.
 Inspect original evidence selectively when material ambiguity warrants it. Deduplicate shared
 sources and load only the evidence relevant to the current question into context.
+
+Keep delegations compact. A worker prompt must contain only the task, paths/IDs, budget, material
+dependencies and task-specific questions; reference the shared CLAUDE.md/agent contract instead
+of repeating it. Do not paste prior memos, reports, long background narratives, generic safety
+rules already present in the worker contract, or complete schema descriptions into a delegation.
+Target at most 4,000 characters for a quick-mode worker prompt and 7,000 for deep mode. A worker's
+chat hand-back must be no more than 1,200 characters: paths, status, decision-relevant findings,
+gaps and actual call counts. The durable memo/JSON files hold the detail.
 
 ## 4. Assess and follow up
 Before synthesis assess coverage, source fitness and independence, significant contradictions,
@@ -99,16 +108,31 @@ change the answer or an important qualification. Revise dependencies/scope when 
 Follow-up is bounded by remaining budget and two rounds, not mandatory. Preserve unresolved
 uncertainty explicitly; unsupported negative search results do not prove absence.
 
+Apply an explicit early-stop test after each task or useful source: stop collection when every
+decision-relevant claim has either one controlling primary source or adequate independent support,
+material contradictions and qualifications are represented, and another bounded search is
+unlikely to change the answer or recommendation. Record the judgment in run.md. Do not collect a
+second source merely to satisfy a count when the first is authoritative, and do not keep searching
+for completeness after the decision-relevant gaps are understood.
+
 ## 5. Synthesize
 Keep research-process material in run.md, task memos and verification.md. The report is a
 self-contained academic or professional publication, not a trace of the work that produced it.
 
-After the evidence assessment, delegate the initial report draft to `report-writer`. Provide the
-exact question, intended audience when known, scope, report path, relevant memo/JSON paths,
-important assumptions, and the conclusions and qualifications the evidence supports. Do not ask
-the writer to research or to infer missing evidence. The coordinator owns the final report,
-reviews the draft against the evidence, and corrects it before verification. If delegation is
-unavailable, apply the report-writer contract directly.
+Before drafting, create one bounded handoff packet at `runs/<run_id>/handoff.md`. It contains only
+the exact question/audience/scope, supported conclusions and qualifications, and the selected
+evidence records needed for the report: evidence ID, title, source, locator, short relevant excerpt
+and material qualification. It must not reproduce full memos or the full run log. Maximum packet
+size is 10,000 characters in quick mode and 24,000 in deep mode. List the source JSON path for each
+record so a later targeted check can inspect it. This packet is the default synthesis and
+verification input; load a full memo or bundle only to resolve a named ambiguity.
+
+In **quick mode**, the coordinator writes the concise report directly. Do not delegate to
+`report-writer`. In **deep mode**, delegate the initial report draft to `report-writer`, providing
+the report path and handoff-packet path rather than all memo/JSON paths or their contents. Do not
+ask the writer to research or infer missing evidence. The coordinator owns the final report and
+reviews the draft against the packet before verification. If delegation is unavailable, apply the
+report-writer contract directly.
 
 Choose headings that fit the topic rather than mechanically exposing the workflow. A substantial
 technical report will commonly use: title; abstract or executive summary; problem definition and
@@ -142,6 +166,12 @@ Before verification, review the report once specifically for publication quality
 residue, duplicated summaries, meta-commentary, unsupported certainty and headings that describe
 the research process rather than the subject.
 
+Batch report and run-file revisions. Accumulate corrections, then make one consolidated rewrite or
+edit per review pass. Do not polish with a chain of small Edit calls: this CLI can return the full
+original file after each edit and repeatedly inject it into context. In quick mode, aim for one
+report Write plus at most one correction pass. In deep mode, aim for the writer's initial Write,
+one coordinator correction pass, and one post-verification correction pass.
+
 ## 6. Verify and revise
 If a Bash tool is available in this session, run
 `python3 scripts/check_citations.py runs/<run_id>` (or the rooted form given at the start of the
@@ -152,8 +182,20 @@ conversation), do not attempt the command and do not report it as a failed step:
 exactly to this section's format so the check can pass, and note in run.md that structural
 validation runs in a separate local process after this session ends, with its result shown to the
 user independently of this conversation.
-Give the verifier the report, evidence paths, method, material gaps and separate remaining budget.
-Save its response in verification.md with the report hash/revision and actual coverage.
+In deep mode, use the verifier after the coordinator review. Give it the report and bounded
+handoff-packet path, named material gaps, and separate remaining budget. It should inspect source
+JSON or original evidence only for claims it actually checks, not read every memo by default.
+
+In quick mode, verification is conditional. The coordinator performs the targeted checks directly
+and does not dispatch `verifier` when the answer is low-stakes, narrow, supported by direct sources,
+and contains no material contradiction or fragile derived result. Dispatch `verifier` when any of
+these apply: safety/legal/medical/financial or other consequential advice; a material contradiction;
+weak, partial or indirect evidence for a load-bearing claim; consequential numerical calculation;
+or low confidence that the recommendation follows. Record the trigger or the reason verification
+was safely kept in-process. Structural citation validation remains unconditional in both modes.
+
+When a verifier is used, save its response in verification.md with the report hash/revision and
+actual coverage.
 Every material flag must be corrected, removed, qualified or explicitly unresolved with its
 consequences for the conclusion. Recheck all changed claims and dependent conclusions regardless
 of flag count. Also correct any workflow residue or reader-facing quality defect the verifier

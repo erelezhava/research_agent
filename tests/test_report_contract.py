@@ -14,9 +14,14 @@ class ReportContractTests(unittest.TestCase):
         self.assertIn("The file under reports/ is a finished publication for the reader", text)
         self.assertIn("no agent narration", text)
 
-    def test_workflow_delegates_reader_facing_draft(self):
+    def test_workflow_uses_mode_specific_synthesis_and_bounded_handoffs(self):
         text = (REPO_ROOT / ".claude/commands/research.md").read_text(encoding="utf-8")
+        self.assertIn("(a plain question with no prefix), the mode is **quick**", text)
+        self.assertIn("In **quick mode**, the coordinator writes", text)
         self.assertIn("delegate the initial report draft to `report-writer`", text)
+        self.assertIn("Maximum packet", text)
+        self.assertIn("verification is conditional", text)
+        self.assertIn("Do not polish with a chain of small Edit calls", text)
         self.assertIn("not a trace of the work that produced it", text)
         self.assertIn("not in the report", text)
 

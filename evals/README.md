@@ -37,6 +37,7 @@ A run **passes** only if every gate passes. Metrics without a gate are reported 
 | `excerpt_fidelity` | no | Share of cited `verbatim` excerpts found in the source text (`--check-excerpts`) |
 | `uncited_paragraph_rate` | no | Share of ≥25-word paragraphs with no citation. Legitimate derivations are allowed, so this is not a gate |
 | `cost_usd_reported`, `duration_ms`, `num_turns` | no | From the CLI `result` event. On a subscription, cost is notional |
+| input/output/cache tokens, `handoff_count`, `handoff_prompt_characters` | no | CLI-reported token totals plus the number and serialized prompt size of agent handoffs; use these to compare otherwise-equivalent Quick and Deep runs |
 | Verifier `catch_rate` per fault type | no (target set by you) | Share of seeded defects the verifier flagged at the injected sentence |
 | Verifier `control_material_flags` | no | Material verdicts on unmodified reports: a baseline of pre-existing issues or false positives |
 

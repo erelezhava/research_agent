@@ -16,5 +16,6 @@ PDF page index from printed page numbers when they differ. Record absence of rea
 as NOT FOUND, not proof of absence. Request external corroboration through the coordinator if
 needed; do not silently answer a different question or replace evidence with model memory.
 Save partial memo and JSON during work, then finish both using the shared status contract.
-Return paths, concise findings, gaps, next actions and self-reported tool counts. The full memo
-schema is in CLAUDE.md; no sibling agent file is required.
+Return paths, status, only the decision-relevant findings, gaps, next actions and self-reported tool
+counts in at most 1,200 characters; do not paste excerpts or repeat the memo. The full memo schema
+is in CLAUDE.md; no sibling agent file is required.
