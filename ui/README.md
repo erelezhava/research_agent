@@ -58,7 +58,7 @@ unaffected by anything below.
    status; a *Start research* button.
 3. **New research** — a four-step wizard: your question → optional follow-ups → **Research
    approach** (Quick vs. Deep, with an editable generated prompt — see below) → review/edit the
-   brief. Approving it creates a real project when connected, or saves a browser-local draft
+   brief and choose Sonnet, Haiku, or Opus for the coordinator. Approving it creates a real project when connected, or saves a browser-local draft
    otherwise.
 4. **Research workspace** — in connected mode, a **Ready to start** screen showing the exact mode
    and prompt plus a clear statement that starting uses your Claude Code allowance; after
@@ -87,7 +87,7 @@ be guaranteed.
 
 ```
 claude -p "<instructions + mode + your approved prompt, verbatim>" \
-  --model sonnet \
+  --model <sonnet|haiku|opus> \
   --output-format stream-json --verbose \
   --tools Read,Write,Edit,Grep,Glob,WebSearch,WebFetch,Task \
   --allowedTools Read,Write,Edit,Grep,Glob,WebSearch,WebFetch,Task \
@@ -98,11 +98,12 @@ claude -p "<instructions + mode + your approved prompt, verbatim>" \
   --session-id <generated-uuid>          # or --resume <uuid> for Resume/Clarify/Repair
 ```
 
-`--model` defaults to `sonnet` and can be overridden when the backend is launched (`--model` on
-`ui/launch.sh`'s underlying `python3 -m server.app` or on `start.py`); whatever value is actually
-configured is validated (`^[A-Za-z0-9_.:-]{1,80}$`) and exposed through `/api/health` so the browser
-can show the real value on the Ready-to-start screen — it is never a guess or a hardcoded label that
-could drift from what's actually running.
+New projects let the user choose `sonnet` (the default), `haiku`, or `opus` in the research brief.
+The choice is validated by the backend, saved with the project, and reused for Resume, Clarify,
+Continue, and citation-repair turns. `--model` sets the initial choice for a new draft and remains
+the fallback for projects created before this choice existed; it defaults to `sonnet`, is validated (`^[A-Za-z0-9_.:-]{1,80}$`), and is exposed
+through `/api/health`. The choice controls the coordinator; the supporting agents remain explicitly
+configured as Sonnet in `.claude/agents/`.
 
 **Bash is not in `--tools`.** An earlier version of this backend included Bash (so the session could
 run the citation checker itself) plus a `--disallowedTools "Bash(rm *)" ...` blacklist meant to keep

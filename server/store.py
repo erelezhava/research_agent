@@ -28,6 +28,7 @@ MAX_TASK_LEN = 2000
 MAX_FILES = 50
 MAX_FILENAME_LEN = 300
 MAX_CLARIFICATION_LEN = 8000
+PROJECT_MODELS = ("sonnet", "haiku", "opus")
 
 
 class ValidationError(ValueError):
@@ -123,6 +124,9 @@ class Store:
         if approach not in ("quick", "deep"):
             raise ValidationError("approach must be 'quick' or 'deep'")
         selected_prompt = _require_str(payload.get("selectedPrompt"), "selectedPrompt", MAX_TEXT_LEN)
+        model = payload.get("model", "sonnet")
+        if model not in PROJECT_MODELS:
+            raise ValidationError("model must be 'sonnet', 'haiku', or 'opus'")
         timeframe = _optional_str(payload.get("timeframe"), "timeframe", 200)
         depth = _optional_str(payload.get("depth"), "depth", 200)
         in_scope = _optional_str(payload.get("inScope"), "inScope", MAX_TEXT_LEN)
@@ -158,6 +162,7 @@ class Store:
             "title": title,
             "question": question,
             "approach": approach,
+            "model": model,
             "selectedPrompt": selected_prompt,
             "timeframe": timeframe,
             "depth": depth,
@@ -279,6 +284,9 @@ def _summarize(meta, state):
         "title": meta.get("title", ""),
         "question": meta.get("question", ""),
         "approach": meta.get("approach", ""),
+        # Projects created before per-project model selection fall back to
+        # the server-configured model in Runner._launch().
+        "model": meta.get("model"),
         "timeframe": meta.get("timeframe", ""),
         "depth": meta.get("depth", ""),
         "createdAt": meta.get("createdAt", ""),

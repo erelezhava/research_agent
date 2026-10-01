@@ -8,7 +8,7 @@ stdlib-only Python structural checker. No autonomous scheduler or paid API fallb
 **In a terminal**, open this project in Claude Code and run `/research <question>` directly (see
 below). **In a browser**, run `python3 start.py` (or `bash ui/launch.sh` on Linux/macOS) for a
 friendlier interface that guides you through the question, an approach
-choice (Quick or Deep), and an editable brief, then launches the same research workflow for you —
+choice (Quick or Deep), a Claude model choice (Sonnet by default, Haiku, or Opus), and an editable brief, then launches the same research workflow for you —
 see [ui/README.md](ui/README.md) for what that adds, exactly how it invokes Claude Code, and its
 security boundaries. Both paths write to the same kind of files and use the same evidence rules
 below; the browser one just adds a guided front end and, for projects it starts, its own
@@ -96,9 +96,10 @@ is unlikely to change the answer, and batch report revisions to avoid repeatedly
 file after small edits. Operational details stay in `run.md` and the final
 status message, not the reader-facing report. Workers use Sonnet. In a terminal `/research`
 session the coordinator uses whatever model your interactive session is running; in a
-browser-started project the coordinator model is a fixed, explicitly-configured value (Sonnet by
-default; see `ui/README.md` for how to change it) — it does **not** inherit "your session model",
-since there is no interactive session to inherit from. Changing coordinator model does not
+browser-started project the coordinator model is saved with that project's approved brief (Sonnet
+by default, with Haiku and Opus available in the interface) — it does **not** inherit "your session model",
+since there is no interactive session to inherit from. The server's `--model` setting changes the
+initial selection and remains the fallback for projects created by older versions. Changing coordinator model does not
 automatically change worker configuration.
 
 The browser's explicit **Continue research** action is a new budget decision: each click permits

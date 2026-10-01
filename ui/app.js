@@ -47,6 +47,8 @@
       answers: {},
       depth: "Balanced",
       timeframe: "Latest available",
+      model: "sonnet",
+      modelEdited: false,
       approach: "quick",      // machine-readable: "quick" | "deep" (Quick is the default)
       prompts: {},            // generated research prompts: { quick, deep }
       promptEdited: {},       // which prompts the user hand-edited (never auto-overwritten)
@@ -62,6 +64,8 @@
     d.answers = d.answers || {};
     d.depth = d.depth || "Balanced";
     d.timeframe = d.timeframe || "Latest available";
+    d.model = (d.model === "haiku" || d.model === "opus") ? d.model : "sonnet";
+    d.modelEdited = d.modelEdited === true;
     d.approach = (d.approach === "quick" || d.approach === "deep") ? d.approach : "quick";
     d.prompts = d.prompts || {};
     d.promptEdited = d.promptEdited || {};
@@ -1047,6 +1051,14 @@
           '<select id="b-depth"><option>Quick answer</option><option>Balanced</option><option>Thorough report</option></select></div>' +
       '</div>' +
 
+      '<label class="field" for="b-model">Claude model</label>' +
+      '<select id="b-model">' +
+        '<option value="sonnet">Sonnet — balanced (default)</option>' +
+        '<option value="haiku">Haiku — fastest</option>' +
+        '<option value="opus">Opus — most capable</option>' +
+      '</select>' +
+      '<p class="hint">This model coordinates the research. Opus typically uses more allowance; Haiku prioritizes speed. Supporting research agents remain configured as Sonnet.</p>' +
+
       '<label class="field">Research approach</label>' +
       '<div class="callout info" style="margin-top:6px" id="b-approach-box"></div>' +
       '<label class="field" for="b-prompt">Selected research prompt</label>' +
@@ -1080,6 +1092,12 @@
     tf.addEventListener("change", function () { d.timeframe = tf.value; b.timeframe = tf.value; persistDraft(); renderContext(); });
     var df = c.querySelector("#b-depth"); df.value = b.depth || "Balanced";
     df.addEventListener("change", function () { d.depth = df.value; b.depth = df.value; persistDraft(); renderContext(); });
+    var mf = c.querySelector("#b-model"); mf.value = d.model || "sonnet";
+    mf.addEventListener("change", function () {
+      d.model = mf.value;
+      d.modelEdited = true;
+      persistDraft();
+    });
 
     var inf = c.querySelector("#b-in"); inf.value = b.inScope || "";
     inf.addEventListener("input", function () { b.inScope = inf.value; d.edited.inScope = true; persistDraft(); });
@@ -1167,7 +1185,7 @@
           body: {
             title: b.title.trim(), question: b.question.trim(), timeframe: b.timeframe, depth: b.depth,
             inScope: b.inScope, outScope: b.outScope, tasks: b.tasks.slice(),
-            approach: d.approach, selectedPrompt: d.prompts[d.approach] || "",
+            approach: d.approach, model: d.model, selectedPrompt: d.prompts[d.approach] || "",
             context: briefContext(d)
           }
         }).then(function (data) {
@@ -1198,6 +1216,7 @@
         // Stable machine-readable approach ("quick"/"deep") plus the complete selected
         // prompt, so the choice can later drive the real research workflow.
         approach: d.approach,
+        model: d.model,
         selectedPrompt: d.prompts[d.approach] || "",
         prompts: { quick: d.prompts.quick || "", deep: d.prompts.deep || "" },
         statusLabel: "Saved · not started",
@@ -1408,6 +1427,7 @@
     var ctx = p.context || { answers: [], files: [], depth: p.depth, timeframe: p.timeframe };
     var ctxHtml = '<h3 style="margin-top:0">Your approved brief</h3>' +
       '<p><strong>Approach:</strong> ' + esc(approachLabel(p.approach)) + '</p>' +
+      '<p><strong>Model:</strong> ' + esc(p.model || "sonnet") + '</p>' +
       '<p><strong>Depth:</strong> ' + esc(ctx.depth || p.depth || "") + ' &nbsp;·&nbsp; <strong>How current:</strong> ' + esc(ctx.timeframe || p.timeframe || "") + '</p>' +
       '<p><strong>In scope:</strong> ' + esc(p.inScope || "") + '</p>' +
       '<p><strong>Out of scope:</strong> ' + esc(p.outScope || "") + '</p>';
@@ -1473,7 +1493,8 @@
       "5. Continue, and answer any follow-up questions that are useful — all optional, skip freely.",
       "6. On **Research approach**, compare the Quick and Deep prompts (see below) and pick one.",
       "7. Edit the chosen prompt if you want to sharpen the focus.",
-      "8. Review the final brief and edit anything that isn't quite right.",
+      "8. Review the final brief, choose the coordinating model (Sonnet is the balanced default; " +
+        "Haiku prioritizes speed; Opus prioritizes capability), and edit anything that isn't quite right.",
       "9. Approve it, then click **Start research** on the next screen — which also shows the " +
         "model Claude Code will run as, before anything starts.",
       "10. Leave the app open, or come back later — check **My research** any time.",
@@ -1671,6 +1692,13 @@
       state.connected = true;
       state.serverHealth = data.claude || null;
       state.model = data.model || null;
+      // Preserve the launch-time --model behavior as the initial choice, but
+      // never overwrite a model the user explicitly selected for this draft.
+      if (!state.draft.modelEdited &&
+          (state.model === "sonnet" || state.model === "haiku" || state.model === "opus")) {
+        state.draft.model = state.model;
+        persistDraft();
+      }
       updateChromeForConnection();
       return true;
     }).catch(function () {
@@ -1899,7 +1927,7 @@
     var briefHtml = '<div class="card side-card"><h3 style="margin-top:0">Approved brief</h3>' +
       '<p><strong>Approach:</strong> ' + esc(approachLabel(p.approach)) + '</p>' +
       '<p><strong>Depth:</strong> ' + esc(p.depth || "") + ' &nbsp;·&nbsp; <strong>How current:</strong> ' + esc(p.timeframe || "") + '</p>';
-    if (state.model) briefHtml += '<p><strong>Model:</strong> ' + esc(state.model) + '</p>';
+    briefHtml += '<p><strong>Model:</strong> ' + esc(p.model || state.model || "sonnet") + '</p>';
     if (p.inScope) briefHtml += '<p><strong>In scope:</strong> ' + esc(p.inScope) + '</p>';
     if (p.outScope) briefHtml += '<p><strong>Out of scope:</strong> ' + esc(p.outScope) + '</p>';
     var ctxFiles = (p.context && p.context.files) || [];
@@ -1929,8 +1957,8 @@
       '<h2 style="margin-top:0">Ready to start</h2>' +
       '<p class="muted">Review the approach and prompt on the left, then start research.</p>' +
       '<div class="callout info"><strong>Starting will use your Claude Code allowance</strong> (the same ' +
-      'subscription/session you use in the terminal)' + (state.model ? ', running as the <strong>' + esc(state.model) +
-          '</strong> model' : '') + '. The local backend sends the request and relevant working context through ' +
+      'subscription/session you use in the terminal), running as the <strong>' +
+          esc(p.model || state.model || "sonnet") + '</strong> model. The local backend sends the request and relevant working context through ' +
           'Claude Code to Claude and accesses web sources as needed. The workflow is instructed to keep its research ' +
           'files under this project’s folder; current Claude Code file permissions are repository-wide rather than an ' +
           'OS-level per-project sandbox. Use this app folder as a trusted workspace. Only one research run can be ' +

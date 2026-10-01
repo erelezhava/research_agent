@@ -139,13 +139,16 @@ class ServerTestCase(unittest.TestCase):
         finally:
             conn.close()
 
-    def create_project(self, approach="quick", question="Compare A and B", prompt="Compare A and B please."):
-        status, data = self.request("POST", "/api/projects", {
+    def create_project(self, approach="quick", question="Compare A and B", prompt="Compare A and B please.", model=None):
+        payload = {
             "title": "Test project", "question": question, "approach": approach,
             "selectedPrompt": prompt, "timeframe": "Latest available", "depth": "Balanced",
             "inScope": "in", "outScope": "out", "tasks": ["step one"],
             "context": {"answers": [{"q": "q1", "a": "a1"}], "files": ["notes.pdf"]},
-        })
+        }
+        if model is not None:
+            payload["model"] = model
+        status, data = self.request("POST", "/api/projects", payload)
         self.assertEqual(status, 201, data)
         return data["project"]["id"]
 
@@ -913,6 +916,47 @@ class ModelTests(ServerTestCase):
         self.wait_terminal(pid)
         argv = json.loads(dumpfile.read_text())
         self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
+
+    def test_project_can_choose_each_supported_model(self):
+        for model in ("sonnet", "haiku", "opus"):
+            with self.subTest(model=model):
+                dumpfile = Path(self.tmp.name) / f"argv-model-{model}.json"
+                self.set_env("FAKE_CLAUDE_ARGV_DUMP", str(dumpfile))
+                self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+                pid = self.create_project(model=model)
+                status, detail = self.request("GET", f"/api/projects/{pid}")
+                self.assertEqual(status, 200, detail)
+                self.assertEqual(detail["project"]["model"], model)
+                self.request("POST", f"/api/projects/{pid}/start")
+                self.wait_terminal(pid)
+                argv = json.loads(dumpfile.read_text())
+                self.assertEqual(argv[argv.index("--model") + 1], model)
+
+    def test_project_rejects_unsupported_model(self):
+        status, data = self.request("POST", "/api/projects", {
+            "title": "x", "question": "q", "approach": "quick",
+            "selectedPrompt": "p", "model": "unknown-model",
+        })
+        self.assertEqual(status, 400, data)
+        self.assertIn("sonnet", data["error"])
+
+    def test_project_model_is_reused_when_resuming(self):
+        first_dump = Path(self.tmp.name) / "argv-model-opus-first.json"
+        self.set_env("FAKE_CLAUDE_ARGV_DUMP", str(first_dump))
+        self.set_env("FAKE_CLAUDE_SCENARIO", "usage_limit")
+        pid = self.create_project(model="opus")
+        self.request("POST", f"/api/projects/{pid}/start")
+        self.assertEqual(self.wait_terminal(pid)["status"], "interrupted")
+
+        resume_dump = Path(self.tmp.name) / "argv-model-opus-resume.json"
+        self.set_env("FAKE_CLAUDE_ARGV_DUMP", str(resume_dump))
+        self.set_env("FAKE_CLAUDE_SCENARIO", "success")
+        status, data = self.request("POST", f"/api/projects/{pid}/resume")
+        self.assertEqual(status, 202, data)
+        self.wait_terminal(pid)
+        argv = json.loads(resume_dump.read_text())
+        self.assertIn("--resume", argv)
+        self.assertEqual(argv[argv.index("--model") + 1], "opus")
 
     def test_custom_model_is_exposed_in_health(self):
         httpd = appmod.make_server(self.root, host="127.0.0.1", port=0,

@@ -764,7 +764,14 @@ class Runner:
                 else:
                     prompt = build_resume_message(project_id)
 
-            argv = build_argv(resolved_bin, prompt, session_id, model=self.model, resume=resume)
+            # New browser projects keep their model with the approved brief so
+            # Resume/Clarify/Repair always use the same choice. Older projects
+            # have no saved model and retain the server's configured default.
+            project_model = meta.get("model") or self.model
+            if project_model not in storemod.PROJECT_MODELS and meta.get("model") is not None:
+                raise RunnerError("this project has an unsupported research model")
+            argv = build_argv(
+                resolved_bin, prompt, session_id, model=project_model, resume=resume)
 
             log_path = self.store.project_dir(project_id) / "logs" / f"session-{session_id}.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -788,6 +795,7 @@ class Runner:
             self._claim(project_id, proc.pid)
             state.update({
                 "status": "starting", "sessionId": session_id, "mode": meta["approach"],
+                "model": project_model,
                 "startedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "pid": proc.pid, "stopReason": None, "error": None,
             })

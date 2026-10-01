@@ -10,8 +10,8 @@ full list this implements):
   touching the filesystem; never accepted verbatim into a path otherwise
 - request bodies size-capped
 - Claude Code is launched as an argv list (server/runner.py), never a shell
-  string, and the browser can never supply or influence that argv beyond the
-  already-approved, already-stored prompt text
+  string; the browser can supply only the already-approved prompt and one of
+  three server-validated model aliases (sonnet, haiku, or opus)
 - no endpoint executes arbitrary shell commands
 - responses never include environment variables, raw stack traces, or
   absolute filesystem paths — errors are logged locally and given generic,
@@ -400,7 +400,7 @@ def main():
     parser.add_argument("--host", default="127.0.0.1", help="must be a loopback address")
     parser.add_argument("--claude-bin", default=None)
     parser.add_argument("--model", default=None,
-                         help="coordinator model Claude Code runs as (default: sonnet)")
+                         help="default coordinator model for new and older projects (default: sonnet)")
     args = parser.parse_args()
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
@@ -419,7 +419,7 @@ def main():
         return 2
 
     print(f"READY http://{args.host}:{args.port}/", flush=True)
-    print(f"Coordinator model: {httpd.app.runner.model}", flush=True)
+    print(f"Default coordinator model: {httpd.app.runner.model}", flush=True)
     if not httpd.app.health.get("claudeFound"):
         print("NOTE: Claude Code CLI was not found on PATH — Start research will show "
               "a Needs attention state until it is installed.", file=sys.stderr)

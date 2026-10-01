@@ -220,7 +220,9 @@ Once the app is open in your browser:
 7. **Edit the chosen prompt** if you want to sharpen the focus — this is a real text box, not just
    a preview.
 8. Click through to **review the final brief** — the title, scope, and planned steps — and edit
-   anything that isn't quite right.
+   anything that isn't quite right. Choose the coordinating Claude model there: **Sonnet** is the
+   balanced default, **Haiku** prioritizes speed, and **Opus** prioritizes capability but typically
+   uses more allowance. Supporting research agents remain configured as Sonnet.
 9. Click **Approve brief & save project**, then on the next screen click **Start research**.
 10. **Leave the app open, or close the browser tab and come back later** — research keeps running
     in the background as long as the terminal window from step 4 above is still open. Reopen
@@ -454,7 +456,7 @@ bash ui/launch.sh 9000     # use a different port
 
 python3 start.py           # cross-platform equivalent, default port 8765
 python3 start.py 9000      # a different port
-python3 start.py --model opus   # use a different coordinator model than the default (sonnet)
+python3 start.py --model opus   # make Opus the initial selection instead of Sonnet
 ```
 
 You can also run the backend module directly for more control:
@@ -466,9 +468,10 @@ python3 -m server.app --host 127.0.0.1 --port 8765 --model opus
 ```
 
 `--host` only accepts loopback addresses (`127.0.0.1`, `localhost`, `::1`) — it refuses to bind
-anywhere else, by design. The configured model (default `sonnet`, or whatever `--model` was actually
-given) is shown on the Ready-to-start screen before you spend any allowance, and is exposed by
-`/api/health` so the interface never guesses at what's actually running.
+anywhere else, by design. For a new project, choose Sonnet (the default), Haiku, or Opus in the
+research brief. That choice is saved with the project and shown on the Ready-to-start screen before
+you spend any allowance. The configured server model sets the initial choice for new drafts and
+remains the fallback for older projects; it is exposed by `/api/health`.
 
 ### Log locations
 
